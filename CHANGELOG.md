@@ -6,10 +6,12 @@ Les étapes 0.1.0 à 0.2.7 étaient déjà présentes dans l’historique publi�
 La publication des sources 0.3.2 regroupe aussi les étapes de développement
 0.2.8, 0.3.0 et 0.3.1, testées et installées localement avant leur push.
 L’étape 0.2.6 est attestée par les notes locales, mais n’a pas de commit ou tag
-propre dans ce dépôt. Aucun tag ni release GitHub n’est créé par ce push.
+propre dans ce dépôt. Les pushes initiaux ne créaient pas de release GitHub.
 Seules les étapes dont une trace est conservée sont décrites.
 
 ## 0.3.4 — 2026-11-14 — Maintien de consigne et projection Twin
+
+Première version préparée pour une release GitHub versionnée, installable via Marketplace en dépôt personnalisé.
 
 - Explication de la chauffe de maintien lorsque les signaux publiés montrent un FF
   positif, réduit par le PI, sans trajectoire ni boost actif.

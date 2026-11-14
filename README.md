@@ -30,7 +30,7 @@ Ces captures utilisent uniquement des données de démonstration synthétiques.
 
 ## État du développement
 
-**Version de travail 0.3.4** — panneau natif avec graphiques température/consigne, commandes,
+**Version 0.3.4** — panneau natif avec graphiques température/consigne, commandes,
 écart filtré et modèle A/B sur 1–48 h. Zoom, déplacement, curseurs synchronisés,
 légende interactive, tables accessibles, schéma logique cliquable et chaîne U.
 Le trajet thermique réunit température mesurée, consigne brute du thermostat et presets publiés.
@@ -201,3 +201,8 @@ Les notices des bibliothèques embarquées sont livrées dans
 `custom_components/smartpi_dashboard/frontend/THIRD_PARTY_NOTICES.md`.
 Le code du projet est distribué sous [licence MIT](LICENSE) ; les licences des
 bibliothèques embarquées restent applicables.
+
+Les versions publiées sont disponibles dans les [releases GitHub](https://github.com/gael1980/smartpi-dashboard/releases).
+Marketplace détecte périodiquement les nouvelles versions pour les utilisateurs
+ayant installé ce dépôt personnalisé. Home Assistant 2026.11.0 minimum est requis.
+Le dépôt n’est pas encore inclus dans le catalogue par défaut.

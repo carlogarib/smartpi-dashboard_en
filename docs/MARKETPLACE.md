@@ -1,85 +1,44 @@
-# Préparation de diffusion Marketplace
+# Diffusion Marketplace
 
-État du catalogue contrôlé le **11 novembre 2026**. Sources et préparation
-0.3.2 publiées sur `main` le **12 novembre 2026** ; aucun tag, release ou demande
-au catalogue créé par ce push. Les résultats CI se consultent dans GitHub Actions.
+Préparation de la première release versionnée **0.3.4**, revue le 14 novembre 2026.
+Le statut et le commit de publication sont visibles dans les [releases GitHub](https://github.com/gael1980/smartpi-dashboard/releases).
 
-## Deux modes de diffusion
+## Distribution
 
-Un dépôt public peut être ajouté manuellement comme dépôt personnalisé de type
-**Intégration**. Être téléchargeable par ce lien ne signifie pas être référencé
-pour tous les utilisateurs. Le catalogue par défaut est géré dans `hacs/default` ;
-l’ajout demande une PR distincte et une revue, après validations et release.
-Voir le [guide du catalogue](https://contributors.home-assistant.io/marketplace/guides/catalog/).
+Le dépôt public peut être ajouté comme dépôt personnalisé de type **Intégration**.
+La release utilise le tag `0.3.4`, aligné sur `manifest.json`. Le composant complet
+et son bundle compilé sont inclus dans `custom_components/smartpi_dashboard/`.
+Marketplace installe directement ces fichiers ; aucun ZIP personnalisé ni build
+sur Home Assistant n’est nécessaire.
 
-Au contrôle, `gael1980/smartpi-dashboard` est public, non archivé, dispose de
-sujets GitHub et des issues activées ; sa branche par défaut est `main`.
-Il n’est pas dans la liste `integration` du catalogue et n’a aucune release GitHub.
-La publication des sources 0.3.2 succède à `4ae772c` (version 0.2.7) et inclut
-les étapes de développement intermédiaires 0.2.8, 0.3.0 et 0.3.1.
+Le dépôt n’est pas inclus dans le catalogue par défaut. Une demande dans
+`hacs/default` et une revue restent nécessaires pour cette visibilité ; aucune
+PR de catalogue n’est créée par cette publication.
 
-## Bilan des fichiers et prérequis
+## Prérequis vérifiés
 
-| Élément | État de la préparation |
-| --- | --- |
-| Dépôt dédié à une seule intégration | Conforme : `custom_components/smartpi_dashboard/`. |
-| Bundle et ressources d’exécution | Inclus dans le composant ; aucune compilation demandée au serveur HA. |
-| Manifest | Domaine, version 0.3.2, propriétaire, documentation, issues et dépendances présents ; ordre des clés normalisé. |
-| Catégorie | `climate.thermostats_heating` ajoutée pour la recherche dans le catalogue. |
-| Minimum HA | `hacs.json` corrigé de 2026.3.0 à **2026.11.0**, conforme au code et aux tests. Ancienne option non documentée `render_readme` retirée. |
-| Traductions d’installation | `translations/en.json` ajouté ; mêmes clés que le français. Le panneau lui-même reste en français. |
-| Icônes locales | `brand/icon.png` 256×256 et `icon@2x.png` 512×512 présents. Logo supplémentaire facultatif. |
-| Documentation | README français, guide anglais, prérequis, installation/mise à jour et données locales décrits. |
-| Historique et release notes | Changelog reconstitué depuis le début ; brouillon de première release dans `docs/releases/0.3.2.md`. |
-| Licence et notices | MIT à la racine et dans le composant distribué ; notices des bibliothèques incluses dans son dossier frontend. |
-| Carnet utilisateur | Store natif dans `.storage`, hors du dossier du composant remplacé à la mise à jour. Aucun `persistent_directory` nécessaire. |
-| HACS et hassfest | Workflow `.github/workflows/marketplace.yml` préparé, sans exclusion de contrôle ni commentaire automatique de PR. Résultats du push à consulter dans GitHub Actions. |
-| CI du produit | Workflow existant conservé ; résultats de la publication 0.3.2 à vérifier dans GitHub Actions. |
+- Une seule intégration, manifeste complet, catégorie thermostat/chauffage.
+- Version minimale Home Assistant **2026.11.0** dans `hacs.json`.
+- README, licence MIT, notices frontend et icônes locales inclus.
+- Traductions d’installation françaises et anglaises ; panneau en français.
+- Store natif de l’observatoire hors du composant, préservé à la mise à jour.
+- Workflow de validation du dépôt pour la catégorie integration et hassfest,
+  sans contrôle ignoré. Les résultats exacts se consultent sur le commit publié.
+- Typage/build reproductible, 73 tests Node, 46 Python avec HA2026.11.0 sans skip,
+  tests navigateur synthétiques à 1440/390/320 px.
 
-Les guides officiels détaillent la
-[structure des intégrations](https://contributors.home-assistant.io/marketplace/guides/integrations/),
-[les clés de hacs.json](https://contributors.home-assistant.io/marketplace/reference/hacs-json/),
-[les traductions personnalisées](https://developers.home-assistant.io/docs/internationalization/custom_integration/)
-et [les catégories](https://contributors.home-assistant.io/core/integrations/categories/).
-Les fichiers de traduction complets sous `translations/` sont les fichiers utilisés
-par un composant personnalisé ; `strings.json` ne remplace pas `translations/en.json`.
+## Publication et mises à jour
 
-## Étapes restantes, après autorisation de publication
+Les [notes de version 0.3.4](releases/0.3.4.md) décrivent installation, redémarrage,
+limites et nouveautés. Une release publiée est requise pour une version nommée :
+un tag seul ne suffit pas. La détection par Marketplace est périodique et dépend
+de la connexion GitHub pour un dépôt personnalisé ; elle n’est pas immédiate.
 
-1. Sources 0.3.2 publiées après revue du diff. Notes de reprise, `.codegraph/`
-   et preuves privées exclus du commit. Relire le changelog avant une release.
-2. Attendre la CI du commit : typage, tests, bundle reproductible, navigateur,
-   cycle de vie HA, puis HACS et hassfest sans `ignore`. Leurs résultats ne sont
-   pas déduits des tests locaux. Les validateurs Docker n’ont pas été exécutés
-   ici : Docker n’est pas disponible dans l’environnement de préparation.
-3. Mettre à jour la description GitHub, qui annonce encore un panneau uniquement
-   en lecture seule. Proposition prête :
-   **Home Assistant dashboard for SmartPI diagnostics, learning and explicit temperature/preset control.**
-4. Publier la première release GitHub **0.3.2**, avec tag **0.3.2** et manifest
-   identique. Relire le brouillon, retirer ses mentions de préparation et indiquer
-   les validations réellement réussies. Actualiser aussi les statuts dans les README,
-   le changelog et ce bilan. Un tag seul n’est pas une release.
-5. Pour la visibilité par défaut, ouvrir ensuite la demande dans `hacs/default`,
-   avec le lien de release et les deux validations réussies. Aucune demande n’est
-   ouverte par cette préparation ; l’acceptation relève des mainteneurs HACS.
+Références officielles : [versions et mises à jour](https://contributors.home-assistant.io/marketplace/guides/releases/),
+[structure](https://contributors.home-assistant.io/marketplace/reference/repository-structure/),
+[validation](https://contributors.home-assistant.io/marketplace/reference/validation/),
+[configuration](https://contributors.home-assistant.io/marketplace/reference/hacs-json/),
+[catalogue](https://contributors.home-assistant.io/marketplace/guides/catalog/).
 
-La [documentation des versions](https://contributors.home-assistant.io/marketplace/guides/releases/)
-précise que la protection par version minimale HA s’applique aux dépôts disposant
-de releases. Une release est donc utile aussi pour éviter une installation de
-cette version sur un HA trop ancien. La structure actuelle permet une release
-à partir des fichiers du dépôt : aucun ZIP personnalisé n’est requis.
-
-## Vérifications et limites
-
-La version locale 0.3.2 passe le typage, le build, 66 tests Node et 46 tests
-Python avec HA 2026.11.0 isolé, sans skip. Les scénarios navigateur sur fixtures
-synthétiques passent, dont les trois nouveaux graphes et la bande de commande
-aux largeurs 1440, 390 et 320 px ; bundle reproductible sur deux builds.
-JSON, versions, traductions, liens locaux, icônes et licence ont été vérifiés
-pendant la préparation Marketplace. Ces contrôles locaux ne valent pas
-exécution de HACS/hassfest ; installation d’essai documentée dans AUDIT.md.
-
-À améliorer sans bloquer un dépôt personnalisé : captures des nouvelles vues,
-traduction de l’ensemble du panneau et gestion des mises à jour des actions CI.
-Les références de validation ajoutées sont fixées aux commits vérifiés ; leurs
-images de conteneur sont celles définies par les actions amont.
+La réussite des validateurs ne vaut pas acceptation au catalogue. Les essais
+sur fixtures ne certifient ni la précision physique du Twin ni l’accessibilité.
