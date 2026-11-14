@@ -162,3 +162,53 @@ test('freshness refuses invalid clocks and unavailable bindings with an old mode
  }
  f.climate.state='unavailable';assert.equal(f.model().appliedEffort(now),null);
 });
+
+function maintenanceFixture() {
+ const f=fixture(),live=f.sensor.attributes.live;
+ f.climate.attributes.temperature=19;
+ Object.assign(live,{control:{mode:'smartpi',phase:'Stable',in_deadband:false},calibration:{state:'Idle'},
+  setpoint:{filtered_setpoint:19,trajectory_active:false,boost_active:false},
+  power:{applied_percent:8.1,command_percent:8.1,ff_percent:14.2,pi_percent:-6.1,hold_percent:0}});
+ return f;
+}
+test('maintenance explains positive FF opposed by PI at or above the active target, including relay idle',()=>{
+ const f=maintenanceFixture();f.climate.attributes.hvac_action='idle';
+ assert.deepEqual(f.model().maintenanceEffort(now),{ff:14.2,pi:-6.1});
+ f.sensor.attributes.live.temperature.indoor=19;
+ assert.ok(f.model().maintenanceEffort(now));
+ assert.equal(f.model().maintenanceEffort(now+600001),null);
+ assert.deepEqual(f.calls,[]);
+});
+test('maintenance refuses trajectories, direct paths, missing values and contradictory PI/FF',()=>{
+ for(const [section,key,values] of [
+  ['control','mode',['hysteresis',null]],['control','phase',['Calibration',null]],['control','in_deadband',[true,null]],
+  ['calibration','state',['Running',null]],['setpoint','trajectory_active',[true,null]],['setpoint','boost_active',[true,null]],
+  ['setpoint','filtered_setpoint',[19.5,null]],['temperature','indoor',[18.9,null]],
+  ['power','hold_percent',[1,null]],['power','ff_percent',[0,null]],['power','pi_percent',[1,null]],
+  ['power','command_percent',[0,50,null]],['power','applied_percent',[0,null]]
+ ])for(const value of values){const f=maintenanceFixture();f.sensor.attributes.live[section][key]=value;
+  assert.equal(f.model().maintenanceEffort(now),null,section+'.'+key+'='+value);}
+ for(const mode of ['cool','off','unavailable']){const f=maintenanceFixture();f.climate.state=mode;assert.equal(f.model().maintenanceEffort(now),null);}
+});
+
+test('Twin presents published step outputs and explains an unreachable maximum-heat ETA above target',()=>{
+ const f=maintenanceFixture(),t=f.sensor.attributes.live.analysis.twin;
+ Object.assign(t,{twin_T_hat:19.34,twin_T_pred:19.35,eta_s:null,eta_reason:'unreachable'});
+ const view=f.model().twinPresentation(false,false,now);
+ assert.equal(view.estimated,19.34);assert.equal(view.predicted,19.35);assert.equal(view.eta,null);
+ assert.match(view.detail,/chauffe maximale/);
+ for(const args of [[true,false,now],[false,true,now],[false,false,now+600001]]){
+  const v=f.model().twinPresentation(...args);assert.equal(v.predicted,null);assert.equal(v.eta,null);
+ }
+});
+test('Twin gates predictions separately from ETA and never uses the equilibrium as a projection',()=>{
+ const f=fixture(),t=f.sensor.attributes.live.analysis.twin;
+ Object.assign(t,{twin_T_hat:19.34,twin_T_pred:19.35,twin_T_steady:-45,twin_T_steady_reliable:true});
+ f.sensor.attributes.live.model.tau_reliable=false;
+ const v=f.model().twinPresentation(false,false,now);assert.equal(v.predicted,19.35);assert.equal(v.eta,null);assert.match(v.detail,/constante de temps/);
+ for(const patch of [{twin_model_reliable:false},{twin_model_reliable:null},{twin_warming_up:true},{twin_warming_up:null},{twin_status:'unavailable'}]){
+  const saved={...t};Object.assign(t,patch);assert.equal(f.model().twinPresentation(false,false,now).predicted,null);Object.assign(t,saved);
+ }
+ t.twin_T_pred=null;assert.equal(f.model().twinPresentation(false,false,now).predicted,null);
+ t.twin_T_pred=0;assert.equal(f.model().twinPresentation(false,false,now).predicted,0);
+});

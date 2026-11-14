@@ -81,9 +81,9 @@ export class ThermalJourneyElement extends LitElement {
     const low = Math.min(baseLow, candidate ?? baseLow), high = Math.max(baseHigh, candidate ?? baseHigh);
     const x = (n: number) => 60 + (n - low) / (high - low) * 880;
     const current = model.measured, target = model.target;
-    const effort = model.appliedEffort(), position = model.setpointPosition();
-    const eta = this.awaitingPublication !== undefined && this.awaitingPublication === this.diagnostic.lastUpdated
-      ? null : model.eta(!!this.choice);
+    const effort = model.appliedEffort(), position = model.setpointPosition(), maintenance = model.maintenanceEffort();
+    const twin = model.twinPresentation(!!this.choice, this.awaitingPublication !== undefined && this.awaitingPublication === this.diagnostic.lastUpdated);
+    const eta = twin.eta;
     const service = typeof this.hass?.callService === "function";
     const selectedPreset = model.presets.find(p => p.id === (this.choice?.kind === "preset" ? this.choice.value : model.attributes.preset_mode));
     const choiceLabel = this.choice?.kind === "preset" ? selectedPreset?.label ?? this.choice.value : "Température manuelle";
@@ -96,13 +96,18 @@ export class ThermalJourneyElement extends LitElement {
         <div class="destination"><span class="caption"><i class="diamond"></i>Consigne active</span><strong aria-label=${target === null ? "Consigne indisponible" : nothing}>${target === null ? "—" : display(target, "", 1)}<small> ${model.unit ?? ""}</small></strong>
           <span class="preset-name">${model.presets.find(p => p.id === model.attributes.preset_mode)?.label ?? ""}</span></div>
       </div>
+      <div class="journey-signals">
       <div class="effort-band" aria-label="Commande et écart à la consigne active">
+        <span class="signal-caption">RÉGULATION · COMMANDE</span>
         ${effort ? html`
           <div class="effort-heading"><span>${effort.label}</span><strong>${effort.percent > 0 && effort.percent < .01 ? "< 0,01 %" : display(effort.percent, " %", 2)}</strong></div>
           <div class=${"effort-track " + (effort.direction < 0 ? "cool" : effort.direction === 0 ? "neutral" : "heat")}
             role="meter" aria-label=${effort.label + " appliquée"} aria-valuemin="0" aria-valuemax="100" aria-valuenow=${effort.percent} aria-valuetext=${display(effort.percent, " % appliqués", 4)}>
             ${effort.percent > 0 ? html`<span class=${"effort-arrow " + (effort.direction < 0 ? "reverse" : effort.direction === 0 ? "neutral" : "")} style=${`width:${effort.percent}%`} aria-hidden="true"></span>` : nothing}
           </div>` : html`<p class="effort-missing">Commande appliquée · données récentes indisponibles</p>`}
+        ${maintenance ? html`<div class="maintenance"><strong>Chauffe de maintien</strong><span class="maintenance-caption">Le FF compense les pertes · le PI ajuste</span>
+          <div class="contributions"><span>FF <b>+${display(maintenance.ff, " %", 1)}</b></span><span>PI <b>${display(maintenance.pi, " %", 1)}</b></span></div>
+          <p>La commande entretient la chaleur pour maintenir la consigne. Elle n’indique pas une montée en température mesurée.</p></div>` : nothing}
         <div class=${"setpoint-position " + (position?.overshoot ? "overshoot" : "")}>
           ${position?.overshoot ? html`<span class="return-chevron" data-direction=${position.direction < 0 ? "left" : "right"} aria-hidden="true">${position.direction < 0 ? "‹" : "›"}</span>
             <span>${position.kind === "above" ? "Au-dessus de +" : "Au-dessous de −"}${display(position.gap, unit, 1)} · retour visé vers ${display(position.target, unit, 1)}</span>`
@@ -110,6 +115,17 @@ export class ThermalJourneyElement extends LitElement {
             : position ? html`<span>Encore ${display(position.gap, unit, 1)} vers la consigne active</span>`
             : html`<span>Écart à la consigne indisponible</span>`}
         </div>
+      </div>
+      <div class="twin-signal" aria-label="Projection du Thermal Twin">
+        <div class="twin-heading"><span class="signal-caption">THERMAL TWIN · MODÈLE</span><span class="twin-badge">${twin.predicted !== null ? "Projection disponible" : "En attente"}</span></div>
+        ${twin.predicted !== null ? html`<div class="twin-values">
+          <div><span>État estimé</span><strong>${display(twin.estimated, unit, 2)}</strong></div>
+          ${twin.estimated !== null ? html`<svg class="twin-arrow" viewBox="0 0 100 24" aria-hidden="true"><path d="M2 12 H94 M86 5 L94 12 L86 19"/></svg>` : nothing}
+          <div><span>Prédiction publiée</span><strong>${display(twin.predicted, unit, 2)}</strong></div>
+        </div><p class="twin-footnote">Sorties du même pas de calcul · horizon non publié</p>` : nothing}
+        <div class=${"twin-eta " + (eta ? "eta available" : "")}><span>ETA · consigne active</span><strong>${eta?.label ?? "Non calculable"}</strong></div>
+        <p class="eta-detail">${twin.detail}</p>
+      </div>
       </div>
       ${model.unit !== null ? html`<svg class="rail" viewBox="0 0 1000 210" role="img" aria-label=${`Échelle de température. Mesure ${display(current, unit, 1)}. Consigne active ${display(target, unit, 1)}.${this.choice ? ` Aperçu ${display(candidate, unit, 1)}.` : ""}`}>
         <line x1="60" x2="940" y1="95" y2="95" class="axis"/>
@@ -120,7 +136,6 @@ export class ThermalJourneyElement extends LitElement {
         ${target !== null ? svg`<path d=${`M ${x(target)} 83 l 12 12 -12 12 -12 -12 Z`} class="target-point"/>` : nothing}
         ${this.choice && candidate !== null ? svg`<line x1=${x(candidate)} x2=${x(candidate)} y1="56" y2="124" class="preview-line"/><path d=${`M ${x(candidate)} 83 l 12 12 -12 12 -12 -12 Z`} class="preview-point"/>` : nothing}
       </svg>` : nothing}
-      ${eta ? html`<div class="eta"><span>ETA · consigne active</span><strong>${eta.label}</strong><span class="eta-detail">${eta.detail}</span></div>` : nothing}
       <details class="authority"><summary>Qui a la main ? <span>${decision.reasons[0]?.label ?? "Origine du réglage non publiée"}</span></summary>
         <p class="note">Demande conservée · ${display(decision.requestedTemperature, unit, 1)}
           · consigne retenue · ${display(target, unit, 1)}</p>
@@ -167,7 +182,15 @@ export class ThermalJourneyElement extends LitElement {
     .effort-band{margin:20px 0 0;min-width:0}.effort-heading{display:flex;justify-content:space-between;gap:12px;font-size:12px;line-height:1.5}.effort-heading strong{font-size:14px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}.effort-track{height:16px;margin-top:5px;position:relative;color:var(--effort)}.effort-track:before{content:"";position:absolute;left:0;right:0;top:7px;height:2px;background:var(--divider-color,#c8d1d3)}.effort-track.cool{color:var(--return)}.effort-track.neutral{color:var(--secondary-text-color,#526268)}.effort-arrow{position:relative;display:block;height:16px;background:currentColor;clip-path:polygon(0 30%,calc(100% - min(10px,50%)) 30%,calc(100% - min(10px,50%)) 0,100% 50%,calc(100% - min(10px,50%)) 100%,calc(100% - min(10px,50%)) 70%,0 70%)}.effort-arrow.reverse{margin-left:auto;transform:scaleX(-1)}.effort-arrow.neutral{clip-path:none;height:6px;top:5px}.effort-missing{margin:0;min-height:42px;font-size:12px;color:var(--secondary-text-color,#526268)}.setpoint-position{display:flex;align-items:center;gap:8px;min-height:30px;font-size:12px;line-height:1.5;color:var(--secondary-text-color,#526268);overflow-wrap:anywhere}.setpoint-position.overshoot{color:var(--return)}.return-chevron{font-size:32px;line-height:24px;font-weight:600;flex:none}.aligned-mark{font-size:20px;line-height:24px;flex:none}
     .rail{display:block;width:100%;height:auto;max-height:180px;overflow:visible;margin:12px 0 0}.axis{stroke:var(--divider-color,#c8d1d3);stroke-width:5;stroke-linecap:round}.distance{stroke:var(--measured);stroke-width:6;stroke-linecap:round}.tick{stroke:var(--secondary-text-color,#526268);stroke-width:1}.preset-tick{stroke:var(--secondary-text-color,#526268);stroke-width:2}
     svg text{font-family:inherit;font-size:22px;fill:var(--secondary-text-color,#526268)}svg .current-label{fill:var(--measured);font-weight:600}.measured-line{stroke:var(--measured);stroke-width:2}.current-point{fill:var(--measured);stroke:var(--card-background-color,#fff);stroke-width:3}.target-point{fill:var(--card-background-color,#fff);stroke:var(--target);stroke-width:4}.preview-line{stroke:var(--target);stroke-width:2;stroke-dasharray:5 5}.preview-point{fill:var(--target);stroke:var(--card-background-color,#fff);stroke-width:3}
-    .eta{display:flex;align-items:baseline;flex-wrap:wrap;gap:6px 12px;border-inline-start:3px solid var(--measured);padding:4px 12px;margin:0 0 18px;font-size:12px}.eta strong{font-size:22px;font-weight:500}.eta-detail{flex-basis:100%;color:var(--secondary-text-color,#526268);line-height:1.5}
+    .journey-signals{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:28px;margin-top:26px;border-top:1px solid var(--divider-color,#ddd);border-bottom:1px solid var(--divider-color,#ddd);padding:20px 0}
+    .journey-signals .effort-band{margin:0}.signal-caption{display:block;font-size:10px;font-weight:700;letter-spacing:.1em;color:var(--secondary-text-color,#526268);margin-bottom:14px}
+    .twin-signal{min-width:0;padding-left:28px;border-left:1px solid var(--divider-color,#ddd);--twin:#536a93}.twin-heading{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;justify-content:space-between}.twin-badge{font-size:10px;color:var(--twin)}
+    .twin-values{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:4px 0 8px}.twin-values>div{min-width:0;display:flex;flex-direction:column;gap:6px}.twin-values>div:last-child{text-align:right}.twin-values span{font-size:11px;color:var(--secondary-text-color,#526268)}.twin-values strong{font-size:24px;line-height:1.2;font-weight:500;white-space:nowrap;font-variant-numeric:tabular-nums;color:var(--twin)}
+    .twin-arrow{width:70px;min-width:24px;flex:1;max-width:100px;height:24px;color:var(--twin)}.twin-arrow path{fill:none;stroke:currentColor;stroke-width:1.6;stroke-dasharray:3 4;stroke-linecap:round}.twin-footnote{margin:8px 0 18px;font-size:10px;color:var(--secondary-text-color,#526268);line-height:1.5}
+    .twin-eta{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:6px 12px;border-top:1px dashed var(--divider-color,#ddd);padding:12px 0 0;margin-top:12px;font-size:11px;color:var(--secondary-text-color,#526268)}.twin-eta strong{font-size:16px;font-weight:500}.twin-eta.available strong{font-size:22px;color:var(--twin)}.twin-signal .eta-detail{color:var(--secondary-text-color,#526268);font-size:11px;line-height:1.6;margin:8px 0 0}
+    .maintenance{margin:14px 0 8px;padding-left:12px;border-left:2px solid var(--effort);font-size:12px;line-height:1.5}.maintenance>strong{font-size:15px;font-weight:500}.maintenance-caption{display:block;font-size:11px;color:var(--secondary-text-color,#526268);margin-top:3px}.maintenance p{font-size:11px;color:var(--secondary-text-color,#526268);margin:6px 0}.contributions{display:flex;flex-wrap:wrap;gap:6px 24px;font-size:11px;margin-top:10px}.contributions b{font-weight:600;font-variant-numeric:tabular-nums;margin-left:5px}
+    @media(max-width:700px){.journey-signals{grid-template-columns:1fr;gap:18px}.twin-signal{padding:18px 0 0;border-left:0;border-top:1px solid var(--divider-color,#ddd)}.twin-values strong{font-size:22px}.twin-heading .signal-caption{margin-bottom:12px}}
+    @media(prefers-color-scheme:dark){.twin-signal{--twin:#b0c6ee}}
     .presets{display:flex;flex-wrap:wrap;gap:8px}button{font:inherit;color:inherit;cursor:pointer;background:var(--card-background-color,#fff);border:1px solid var(--divider-color,#b5c0c4);border-radius:9px;min-height:44px;padding:9px 13px}button:focus-visible,input:focus-visible{outline:3px solid var(--primary-color,#167883);outline-offset:3px}button:disabled{opacity:.5;cursor:default}button:not(:disabled):hover{border-color:var(--measured)}
     .preset{display:flex;flex:1 1 100px;min-width:0;flex-direction:column;gap:5px;text-align:left;font-size:13px;overflow-wrap:anywhere}.preset strong{font-weight:500;font-size:17px}.preset.active{border-bottom:3px solid var(--target)}.active-label{font-size:11px;color:var(--secondary-text-color,#526268)}.preset[aria-pressed=true]{outline:2px dashed var(--target);outline-offset:2px}
     .temperature-control{margin-top:22px}label{font-size:13px;display:flex;justify-content:space-between;gap:12px}label span{font-weight:600}.adjust{display:flex;gap:14px;align-items:center;margin-top:10px}.adjust button{width:44px;flex:none;font-size:22px;padding:0}input{width:100%;min-width:0;min-height:44px;accent-color:var(--measured);cursor:pointer}

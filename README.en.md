@@ -23,7 +23,7 @@ Add `gael1980/smartpi-dashboard` as a custom **Integration** repository under
 Open the sidebar panel as an administrator. Updates to a loaded custom integration
 require a Home Assistant restart.
 
-Version 0.3.3 sources are published on `main`. This push does not create a tag
+Version 0.3.4 sources are published on `main`. This push does not create a tag
 or GitHub release. The Marketplace link adds the custom repository; it is not
 in the default catalog. Check GitHub Actions results before installing.
 
@@ -37,6 +37,10 @@ compiled frontend from the same version. Back up Home Assistant before updating.
 Selections are previews until **Apply**. Only the linked thermostat's temperature
 or preset can be changed. Schedules remain managed by your existing scheduler;
 there are no automatic PI adjustments or calibration actions.
+
+The thermal journey explains FF-led maintenance heating when supported by the
+published signals. Recent, reliable Twin step outputs appear beside the command
+with a dotted marker; unavailable ETA values have a brief explanation.
 
 The Twin ETA is shown only when available, reliable and recent. It is a published
 best-case estimate, not a guarantee of arrival time.

@@ -514,6 +514,21 @@ try {
   checks.journeyInitial = await journey(`return {calls:f.calls.length,eta:r.querySelector('.eta')?.textContent.includes('35 min'),target:r.querySelector('.destination').textContent.includes('20'),measured:r.querySelector('.measured').textContent.includes('19,2')};`);
   assert.equal(checks.journeyInitial.calls, 0);
   assert.ok(checks.journeyInitial.eta && checks.journeyInitial.target && checks.journeyInitial.measured);
+  checks.journeyMaintenance = await journey(`
+    const saved=structuredClone(f.sensor.attributes.live),target=f.climate.attributes.temperature;
+    const live=f.sensor.attributes.live;
+    f.climate.attributes.temperature=19;
+    Object.assign(live,{control:{mode:'smartpi',phase:'Stable',in_deadband:false},calibration:{state:'Idle'},
+      setpoint:{filtered_setpoint:19,trajectory_active:false,boost_active:false},
+      power:{ff_percent:14.2,pi_percent:-6.1,command_percent:8.1,applied_percent:8.1,hold_percent:0}});
+    ${sync}
+    const visible=r.querySelector('.maintenance')?.textContent.includes('Chauffe de maintien')&&r.querySelector('.maintenance')?.textContent.includes('14,2');
+    live.setpoint.trajectory_active=true;${sync}
+    const hidden=!r.querySelector('.maintenance');
+    f.sensor.attributes.live=saved;f.climate.attributes.temperature=target;${sync}
+    return visible&&hidden&&f.calls.length===0;
+  `);
+  assert.ok(checks.journeyMaintenance);
   checks.journeyEffortProportion = await journey(`
     const results=[];
     for(const percent of [0,15,68,100]){
@@ -752,6 +767,31 @@ try {
   assert.ok(checks.journeyLocked);
   checks.journeyMissing = await journey(`f.sensor.state='unavailable';${sync}return !r.querySelector('.eta')&&!r.querySelector('input')&&r.querySelector('.measured').textContent.includes('—')&&document.documentElement.scrollWidth<=innerWidth;`);
   assert.ok(checks.journeyMissing);
+  await send('Page.navigate',{url:'http://127.0.0.1:8765/frontend/tests/thermal-browser.html'});
+  for(let n=0;n<50;n++){if(await evaluate("!!window.thermalFixture?.panel.shadowRoot.querySelector('smartpi-thermal-journey')?.shadowRoot"))break;await pause(100);}
+  checks.twinScene = await journey(`
+    const live=f.sensor.attributes.live;
+    f.climate.attributes.temperature=19;f.climate.attributes.hvac_action='idle';
+    Object.assign(live,{control:{mode:'smartpi',phase:'Stable',in_deadband:false},calibration:{state:'Idle'},
+      setpoint:{filtered_setpoint:19,trajectory_active:false,boost_active:false},
+      power:{ff_percent:14.2,pi_percent:-6.1,command_percent:8.1,applied_percent:8.1,hold_percent:0}});
+    Object.assign(live.analysis.twin,{twin_T_hat:19.34,twin_T_pred:19.35,eta_s:null,eta_reason:'unreachable'});
+    ${sync}
+    // A fresh diagnostic after the target change releases the waiting state.
+    f.sensor.last_updated=new Date(Date.now()+1).toISOString();${sync}
+    return !!r.querySelector('.twin-arrow')&&r.textContent.includes('chauffe maximale')&&r.textContent.includes('Chauffe de maintien')&&!r.querySelector('.eta')&&f.calls.length===0;
+  `);
+  assert.ok(checks.twinScene);
+  await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:'light'}]});
+  for(const [width,height] of [[1440,1000],[390,844],[320,844]]){
+    await send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
+    await journey(`j.scrollIntoView({block:'start'});`);await settle();
+    assert.ok(await journey(`return document.documentElement.scrollWidth<=innerWidth&&r.querySelector('.twin-signal').getBoundingClientRect().right<=innerWidth;`));
+    const shot=await send('Page.captureScreenshot',{format:'png'});
+    await writeFile(output+'/twin-'+width+'.png',Buffer.from(shot.data,'base64'));
+  }
+  checks.twinUnavailable = await journey(`f.sensor.attributes.live.analysis.twin.twin_model_reliable=false;${sync}return !r.querySelector('.twin-arrow')&&!r.querySelector('.eta')&&r.textContent.includes('modèle fiable');`);
+  assert.ok(checks.twinUnavailable);
   assert.equal(errors.length, 0, JSON.stringify(errors.slice(0, 2).map(error => error.exception?.description ?? error.text)));
   await writeFile(
     output + "/checks.json",

@@ -103,6 +103,21 @@ export class ThermalJourney {
     return {percent, direction: mode === "heat" ? 1 : mode === "cool" ? -1 : 0,
       label: mode === "heat" ? "Commande de chauffe" : mode === "cool" ? "Commande de refroidissement" : "Commande appliquée"};
   }
+  maintenanceEffort(now = Date.now()) {
+    const effort = this.appliedEffort(now), live = this.diagnostic.live;
+    // Describe only an explicit stable PI/FF path, without inferring a trend.
+    if (!effort || effort.direction !== 1 || effort.percent <= 0 || this.unit === null ||
+      this.measured === null || this.target === null || this.filtered !== this.target || this.measured < this.target ||
+      at(live, "control.mode") !== "smartpi" || at(live, "control.phase") !== "Stable" ||
+      at(live, "control.in_deadband") !== false || at(live, "calibration.state") !== "Idle" ||
+      at(live, "setpoint.trajectory_active") !== false || at(live, "setpoint.boost_active") !== false ||
+      num(at(live, "power.hold_percent")) !== 0) return null;
+    const ff = num(at(live, "power.ff_percent")), pi = num(at(live, "power.pi_percent"));
+    const command = num(at(live, "power.command_percent"));
+    if (ff === null || ff <= 0 || ff > 100 || pi === null || pi > 0 || command === null ||
+      command <= 0 || command > 100 || Math.abs(ff + pi - command) > .2) return null;
+    return {ff, pi};
+  }
   setpointPosition(now = Date.now()) {
     // A descriptive gap to the current raw target, not the diagnostic's old ETA.
     if (!this.currentPublication(now) || this.unit === null || this.measured === null || this.target === null || !["heat", "cool"].includes(this.climate!.state)) return null;
@@ -112,6 +127,33 @@ export class ThermalJourney {
     const kind = delta === 0 ? "aligned" : delta > 0 ? "above" : "below";
     return {kind, overshoot: this.climate!.state === "heat" ? delta > 0 : delta < 0,
       direction: delta === 0 ? 0 : delta > 0 ? -1 : 1, gap: Math.abs(delta) / 10, target: this.target};
+  }
+  twinPresentation(preview = false, waiting = false, now = Date.now()) {
+    const absent = (detail: string) => ({estimated: null, predicted: null, eta: null, detail});
+    if (preview) return absent("Aperçu du réglage · la projection de la consigne active est masquée.");
+    if (waiting) return absent("En attente d’une nouvelle publication après le changement de consigne.");
+    if (!this.available || this.unit === null || !["heat", "cool"].includes(this.climate!.state))
+      return absent("Projection indisponible dans cet état du thermostat.");
+    if (!this.currentPublication(now)) return absent("Données Twin récentes indisponibles.");
+    const twin = (path: string) => at(this.diagnostic.live, "analysis.twin." + path);
+    if (twin("twin_warming_up") === true) return absent("Le Twin est en cours d’initialisation.");
+    if (twin("twin_status") !== "ok" || twin("twin_model_reliable") !== true || twin("twin_warming_up") !== false)
+      return absent("Le Twin ne publie pas de modèle fiable disponible.");
+    const estimated = num(twin("twin_T_hat")), predicted = num(twin("twin_T_pred"));
+    const eta = this.eta(false, now);
+    let detail = eta?.detail ?? "Aucun délai calculable publié par le Twin.";
+    if (!eta) {
+      const reason = twin("eta_reason");
+      if (at(this.diagnostic.live, "model.tau_reliable") !== true) detail = "ETA indisponible · constante de temps non fiable.";
+      else if (reason === "unreachable") detail = this.climate!.state === "heat" && this.measured !== null && this.target !== null && this.measured > this.target
+        ? "Pas de délai de retour : l’ETA simule une chauffe maximale alors que la mesure dépasse la consigne."
+        : "La consigne n’est pas atteinte dans le scénario ETA du Twin ; ce résultat ne décrit pas toutes les actions du régulateur.";
+      else if (reason === "too_far") detail = "Le délai publié dépasse l’horizon de 48 h affichable.";
+      else if (reason === "missing_text") detail = "ETA indisponible · température extérieure manquante.";
+      else if (reason === "not_reliable") detail = "ETA indisponible · modèle déclaré non fiable pour ce calcul.";
+      else if (reason === "ok" || reason === "already_reached") detail = "ETA en attente de données cohérentes et récentes pour la consigne active.";
+    }
+    return {estimated, predicted, eta, detail};
   }
   eta(preview = false, now = Date.now()) {
     if (preview || !this.available || this.target === null || this.measured === null || this.unit === null) return null;

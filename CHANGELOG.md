@@ -9,6 +9,17 @@ L’étape 0.2.6 est attestée par les notes locales, mais n’a pas de commit o
 propre dans ce dépôt. Aucun tag ni release GitHub n’est créé par ce push.
 Seules les étapes dont une trace est conservée sont décrites.
 
+## 0.3.4 — 2026-11-14 — Maintien de consigne et projection Twin
+
+- Explication de la chauffe de maintien lorsque les signaux publiés montrent un FF
+  positif, réduit par le PI, sans trajectoire ni boost actif.
+- Commande et sorties du Twin côte à côte sur desktop, empilées sur mobile.
+- Repère Twin pointillé uniquement sur données récentes et modèle déclaré fiable ;
+  estimation et prédiction du même pas, sans horizon temporel inventé.
+- ETA numérique uniquement lorsque ses gardes sont satisfaites ; motif bref sinon.
+  Le scénario de chauffe maximale est explicité au-dessus de la consigne.
+- Tests unitaires et navigateur sur fixtures synthétiques, thèmes clair/sombre.
+
 ## 0.3.3 — 2026-11-13 — Fiabilité de la flèche de commande
 
 - Une mise à jour des attributs du thermostat ne masque plus à tort une commande

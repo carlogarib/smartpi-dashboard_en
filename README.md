@@ -30,12 +30,15 @@ Ces captures utilisent uniquement des données de démonstration synthétiques.
 
 ## État du développement
 
-**Version de travail 0.3.3** — panneau natif avec graphiques température/consigne, commandes,
+**Version de travail 0.3.4** — panneau natif avec graphiques température/consigne, commandes,
 écart filtré et modèle A/B sur 1–48 h. Zoom, déplacement, curseurs synchronisés,
 légende interactive, tables accessibles, schéma logique cliquable et chaîne U.
 Le trajet thermique réunit température mesurée, consigne brute du thermostat et presets publiés.
 Une flèche au-dessus de la règle représente la commande appliquée ; un chevron
 distinct indique le retour visé lorsqu’une température dépasse la consigne.
+Un encart explique la chauffe de maintien pilotée par le FF lorsque les signaux le permettent.
+À côté de la commande, les sorties fiables et récentes du Twin apparaissent avec un
+repère pointillé ; l’absence de délai ETA est expliquée sans inventer de prévision.
 La sélection reste un aperçu jusqu’à **Appliquer**. Les changements reçus de Home Assistant
 annulent un choix devenu obsolète ; les plannings restent gérés à l’extérieur du panneau.
 L’ETA est affiché uniquement quand le Twin et son délai publié sont disponibles,
