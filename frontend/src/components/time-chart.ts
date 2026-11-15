@@ -1,5 +1,5 @@
 import { LitElement, html, css, unsafeCSS } from "lit";
-import { customElement, property } from "lit/decorators.js";
+import { customElement, property, state } from "lit/decorators.js";
 import uPlot from "uplot";
 import plotCSS from "uplot/dist/uPlot.min.css";
 import { valueAt, type LearningMark, type Sample } from "../utils/timeseries";
@@ -25,6 +25,7 @@ export class TimeChart extends LitElement {
   @property({ attribute: false }) marks: LearningMark[] = [];
   @property({ type: Boolean }) thermalPhases = false;
   @property({ type: Boolean }) commandComparison = false;
+  @state() private legendTime: number | null = null;
   private lastSamples?: Sample[];
   private lastSignature = "";
   private plot?: uPlot;
@@ -50,6 +51,10 @@ export class TimeChart extends LitElement {
     this.plot?.destroy();
     this.plot = undefined;
   }
+  protected willUpdate(changed: Map<string, unknown>) {
+    if (changed.has("syncKey")) this.legendTime = null;
+    if (changed.has("selectedTime")) this.legendTime = this.selectedTime;
+  }
   protected updated(changed: Map<string, unknown>) {
     const signature = JSON.stringify([
       this.curves,
@@ -69,6 +74,7 @@ export class TimeChart extends LitElement {
     this.draw();
   }
   private inspect(time: number) {
+    this.legendTime = time;
     if (this.inspectable)
       this.dispatchEvent(new CustomEvent("inspect-publication", {
         detail: time, bubbles: true, composed: true,
@@ -206,6 +212,7 @@ export class TimeChart extends LitElement {
               }
             : {},
         },
+        legend: { show: false },
         cursor: { sync: { key: this.syncKey }, drag: { x: true, y: false } },
         bands: this.commandComparison ? [
           {series: [1, 2], fill: "rgba(180,105,30,.22)"},
@@ -279,6 +286,15 @@ export class TimeChart extends LitElement {
           })),
         ],
         hooks: {
+          setCursor: [(u) => {
+            // Keep the inspected publication on touch/mouse leave. Null values
+            // belong to this exact timestamp; never snap each series separately.
+            const idx = u.cursor.idx;
+            if (!this.applying && idx != null && u.cursor.left! >= 0) {
+              const time = u.data[0][idx];
+              if (time !== undefined) this.legendTime = time;
+            }
+          }],
           draw: [(u) => {
             this.drawThermalPhases(u);
             this.drawMarks(u, text);
@@ -357,6 +373,10 @@ export class TimeChart extends LitElement {
     const count = this.samples.filter((s) =>
       this.curves.some((c) => this.seriesValue(s, c) !== null),
     ).length;
+    const visible = this.samples.filter(s => s.time >= this.range[0] && s.time <= this.range[1]);
+    const selected = visible.find(s => s.time === this.legendTime);
+    const publication = selected ?? visible.at(-1);
+    const showLatest = !selected;
     return html`<h3>${this.heading}</h3>
       <div class="series-controls" role="group" aria-label="Séries affichées">
         ${this.curves.map(
@@ -382,6 +402,18 @@ export class TimeChart extends LitElement {
           const time = plot.data[0][plot.posToIdx(event.clientX - plot.over.getBoundingClientRect().left)];
           if (time !== undefined) this.inspect(time);
         } }}></div>
+      ${publication ? html`<div class="publication-values" aria-label="Valeurs de la publication">
+        <div class="publication-date">${showLatest ? "Dernière publication de la fenêtre" : "Publication sélectionnée"}
+          · <time datetime=${new Date(publication.time * 1000).toISOString()}>${new Date(publication.time * 1000).toLocaleString()}</time>
+          ${!showLatest ? html`<button type="button" @click=${() => {if (this.inspectable) this.inspect(visible.at(-1)!.time); else this.legendTime = null;}}>Dernière publication</button>` : ""}</div>
+        <dl>${this.curves.map(c => {
+          const value = this.seriesValue(publication, c);
+          return html`<div class=${this.hiddenCurves.has(c.label) ? "series-muted" : ""}>
+            <dt><span style=${"background:" + c.color} aria-hidden="true"></span>${c.label}</dt>
+            <dd>${value === null ? "Absente à cet instant" : value.toLocaleString(undefined, {maximumFractionDigits: 3}) + " " + c.unit}</dd>
+          </div>`;
+        })}</dl>
+      </div>` : html`<p>Aucune publication dans cette fenêtre.</p>`}
       ${!count
         ? html`<p>Aucune valeur disponible pour cette fenêtre.</p>`
         : html`<details>
@@ -430,6 +462,13 @@ export class TimeChart extends LitElement {
         display: block;
         min-width: 0;
       }
+      .publication-values{font-size:12px;margin:8px 0 14px}
+      .publication-date{color:var(--secondary-text-color);line-height:1.6}
+      .publication-date button{font:inherit;color:var(--primary-text-color);background:transparent;border:1px solid var(--divider-color);border-radius:6px;padding:5px 8px;margin-left:6px;cursor:pointer;min-height:32px}
+      dl{display:flex;flex-wrap:wrap;gap:8px 16px;margin:8px 0}
+      dl div{display:flex;flex-wrap:wrap;gap:5px;border-bottom:1px solid var(--divider-color);padding:5px 0}
+      dt{display:flex;align-items:center;gap:6px;font-weight:600}dd{margin:0;font-variant-numeric:tabular-nums}
+      dt span{width:9px;height:9px;display:inline-block;border-radius:50%}.series-muted{opacity:.6}
       h3 {
         font-size: 15px;
         margin: 0 0 12px;

@@ -85,6 +85,7 @@ export class VisualDiagnostics extends LitElement {
   @state() private preferSession = false;
   @state() private followNow = true;
   @state() private inspection?: { entityId: string; recorder: boolean; time: number };
+  @state() private replay = false;
   @state() private livePublicationMissing = false;
   @state() private block?: "pi" | "ff" | "model";
 
@@ -290,12 +291,15 @@ export class VisualDiagnostics extends LitElement {
       available: sample.state !== "unknown" && sample.state !== "unavailable",
       live: sample.live,
       history: sample.history,
+      lastUpdated: new Date(sample.time*1000).toISOString(),
+      climateId: null,
+      temperatureUnit: sample.unit ?? null,
     } : d;
     const route = new ControlPresentation(snapshot).route;
     const source = sample ? (fromRecorder ? "Recorder" : "Session") : "Instantané SmartPI";
     const time = sample ? new Date(sample.time * 1000) : d.lastUpdated ? new Date(d.lastUpdated) : null;
     const format = (value: unknown, unit = "") =>
-      value == null && sample && snapshot.available ? "Non archivé" : display(value, unit);
+      value == null && sample && snapshot.available ? "Non archivé" : display(value, unit.replace("°C",sample ? sample.unit ?? "unité source" : d.temperatureUnit ?? "unité source"));
     const fields = [
       ["Température intérieure mesurée", "temperature.indoor", " °C"],
       ["Consigne filtrée", "setpoint.filtered_setpoint", " °C"],
@@ -319,7 +323,19 @@ export class VisualDiagnostics extends LitElement {
     const twin = at(snapshot.live, twinPath) == null
       ? format(undefined)
       : display(reliableValue(snapshot.live, twinPath, "analysis.twin.twin_T_steady_reliable"), " °C");
-    return html`<section class="synoptic" aria-labelledby="synoptic-title">
+    const historyDiagnostic = sample ? {...snapshot,live:{...sample.live,
+      temperature:{...(sample.live.temperature as object ?? {}),indoor:valueAt(sample,"temperature.indoor")},
+      setpoint:{...(sample.live.setpoint as object ?? {}),filtered_setpoint:valueAt(sample,"setpoint.filtered_setpoint")},
+      power:{...(sample.live.power as object ?? {}),applied_percent:valueAt(sample,"power.applied_percent"),command_percent:valueAt(sample,"power.command_percent"),pi_percent:valueAt(sample,"power.pi_percent"),ff_percent:valueAt(sample,"power.ff_percent")},model:{...(sample.live.model as object ?? {}),a:valueAt(sample,"model.a"),b:valueAt(sample,"model.b")}}} : null;
+    return html`${sample ? html`<section class="replay-bar">
+      <strong>Historique · ${source} · ${time?.toLocaleString()}</strong>
+      <label>Parcourir les publications <input aria-label="Publication historique" type="range" min="0" max=${Math.max(0,this.windowData(fromRecorder?this.recorder:this.session).samples.length-1)}
+        .value=${String(this.windowData(fromRecorder?this.recorder:this.session).samples.findIndex(s=>s.time===sample.time))}
+        @input=${(e:Event)=>{const sample=this.windowData(fromRecorder?this.recorder:this.session).samples[Number((e.target as HTMLInputElement).value)];if(sample)this.inspect(sample.time);}}></label>
+      <button type="button" aria-pressed=${this.replay} @click=${()=>{this.replay=!this.replay;}}>Schéma de cette publication</button>
+      <p>Uniquement les champs archivés. Consigne normale, fenêtre et mode HVAC non déduits de l’état actuel.</p>
+      ${this.replay && historyDiagnostic ? html`<smartpi-control-diagram .historical=${true} .diagnostic=${historyDiagnostic} .expert=${this.expert}></smartpi-control-diagram>`:nothing}
+    </section>`:nothing}<section class="synoptic" aria-labelledby="synoptic-title">
         <h3 id="synoptic-title">Synoptique de régulation</h3>
         <ol class="signal-path" aria-label=${route === "unavailable" ? "Schéma de référence" : "Voie déclarée"}>
           ${path.map((label, i) => html`<li class=${route === "unavailable" ? "" : "active-path"}>
@@ -385,6 +401,8 @@ export class VisualDiagnostics extends LitElement {
     const selected = supervision && point?.entityId === d.entityId && point.recorder === fromRecorder
       ? samples.find((sample) => sample.time === point.time)
       : undefined;
+    const archivedUnits = [...new Set(samples.map(s=>s.unit))];
+    const chartUnit = archivedUnits.length===1 && ["°C","°F"].includes(archivedUnits[0] ?? "") ? archivedUnits[0]! : "unité source";
     const chart = (heading: string, curves: Curve[], percent = false) =>
       html`<section class=${percent ? "chart command-chart" : "chart"}>
         <smartpi-time-chart
@@ -392,7 +410,7 @@ export class VisualDiagnostics extends LitElement {
           .marks=${learning && curves === learningTemp ? marks : []}
           .thermalPhases=${learning && curves === learningTemp}
           .samples=${samples}
-          .curves=${curves}
+          .curves=${curves.map(c=>({...c,unit:c.unit.replace("°C",chartUnit)}))}
           .range=${this.range}
           .percent=${percent}
           .syncKey=${d.entityId}
@@ -496,6 +514,7 @@ export class VisualDiagnostics extends LitElement {
             .checked=${this.preferSession}
             @change=${(e: Event) => {
               this.inspection = undefined;
+      this.replay = false;
               this.livePublicationMissing = false;
               this.preferSession = (e.target as HTMLInputElement).checked;
             }}
@@ -530,6 +549,12 @@ export class VisualDiagnostics extends LitElement {
             large ou attendre une mise à jour normale de Home Assistant.
           </p>`
         : nothing}
+      <details class="pane quality-panel"><summary>Qualité des données de la fenêtre</summary>
+        <p>${fromRecorder?"Recorder":"Session"} · ${samples.length} publications · ${samples.filter(s=>valueAt(s,"temperature.indoor")!==null&&valueAt(s,"setpoint.filtered_setpoint")!==null&&valueAt(s,"power.applied_percent")!==null).length} avec mesure, consigne filtrée et commande.
+        ${samples.filter((s,i)=>i>0&&s.time-samples[i-1].time>600).length} interruption(s) entre publications > 10 min.</p>
+        <p>Unité historique : ${chartUnit}. Une unité absente des archives n’est pas remplacée par celle du thermostat actuel.</p>
+        <p>Les publications sont irrégulières. Ces nombres ne constituent pas un pourcentage de couverture temporelle. Aucun trou n’est rempli et aucune confiance actuelle n’est appliquée au passé.</p>
+      </details>
       ${supervision && this.livePublicationMissing
         ? html`<p class="notice" role="status">La publication du direct est introuvable dans la source et la fenêtre affichées. L’inspecteur affiche l’instantané actuel.</p>`
         : nothing}
@@ -824,6 +849,10 @@ export class VisualDiagnostics extends LitElement {
     </div>`;
   }
   static styles = css`
+    .replay-bar{grid-column:1/-1;border:2px solid var(--primary-color);border-radius:8px;padding:14px;margin:10px;color:var(--primary-text-color)}
+    .replay-bar label{display:block;font-size:13px;margin:12px 0}.replay-bar input{display:block;width:100%;min-height:44px;accent-color:var(--primary-color)}
+    .replay-bar button{min-height:44px}.replay-bar p,.quality-panel p{font-size:12px;line-height:1.5}.quality-panel summary{cursor:pointer;min-height:44px;padding-top:12px}
+
     :host {
       display: block;
       margin-top: 22px;

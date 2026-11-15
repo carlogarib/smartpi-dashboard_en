@@ -7,7 +7,7 @@ export interface HAState {
   last_updated?: string;
   last_changed?: string;
 }
-export interface HassLike { states: Record<string, HAState>; language?: string }
+export interface HassLike { states: Record<string, HAState>; language?: string; config?: {unit_system?: {temperature?: string}} }
 export interface SmartPIDiagnostic {
   entityId: string;
   climateId: string | null;
@@ -17,6 +17,7 @@ export interface SmartPIDiagnostic {
   available: boolean;
   live: Rec;
   history: Rec;
+  temperatureUnit?: string | null;
 }
 
 export function record(value: unknown): value is Rec {
@@ -68,6 +69,7 @@ export function discover(hass: HassLike | null | undefined): SmartPIDiagnostic[]
       name: typeof climate?.attributes.friendly_name === "string" ? climate.attributes.friendly_name : fallback,
       state: sensor.state, lastUpdated: sensor.last_updated ?? null,
       available: sensor.state !== "unknown" && sensor.state !== "unavailable",
+      temperatureUnit: (() => {const u=at(climate?.attributes,"configuration.temperature_unit") ?? climate?.attributes.temperature_unit ?? hass.config?.unit_system?.temperature;return u==="°C" || u==="°F" ? u : null;})(),
       live: sensor.state === "unknown" || sensor.state === "unavailable" ? {} : a.live, history: a.history,
     });
   }

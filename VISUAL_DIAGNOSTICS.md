@@ -523,3 +523,48 @@ du modèle affichée séparément. Les temps morts, dernières issues et motifs 
 ceux de la publication courante. Pendant le bootstrap, les hausses de mesures
 collectées peuvent produire des repères A/B distinctement libellés. Si les
 compteurs historiques existent, un graphe de collecte partage la plage active.
+
+### Présentation locale : cartes, légendes et surveillance
+
+- Les cartes lisent la consigne normale (`climate.attributes.temperature`) et le
+  preset publié sur le thermostat explicitement et uniquement lié au diagnostic,
+  via `ThermalJourney`. La consigne filtrée reste `live.setpoint.filtered_setpoint`.
+  Le contour et le texte indiquent le preset ; l’arrêt HVAC prend priorité. Un
+  preset inconnu garde son libellé, sans couleur déduite de la température.
+- Le remplissage vertical depuis le bas représente `live.power.applied_percent`,
+  commande et non watts, avec les gardes de fraîcheur et de contexte de
+  `ThermalJourney.appliedEffort`. Zéro reste valide ; une valeur absente ou
+  ancienne ne produit aucun remplissage. La sélection a un repère indépendant.
+- Les légendes utilisent une publication commune et datée : la dernière dans la
+  fenêtre par défaut, ou celle inspectée au curseur/toucher/clavier. Quitter le
+  graphe conserve cette publication. Une valeur manquante à cet instant est
+  explicitement absente ; aucune recherche par série ni interpolation ne comble
+  les trous. Recorder et session restent distincts.
+- Seul `live.learning.stage=monitoring`, hors bootstrap, compacte les détails
+  de collecte dans un volet et supprime les deux barres. Les compteurs, fiabilité,
+  délais et motifs restent consultables. `learning`, `bootstrap`, `degraded` et
+  un état inconnu restent développés, même avec des compteurs remplis à 100 %.
+  La collecte initiale achevée ne signifie pas un apprentissage définitivement
+  arrêté ni une validation scientifique. Source vérifiée :
+  [diagnostics.py, _build_ab_learning_stage et _build_learning](https://github.com/KipK/vtherm_smartpi/blob/master/custom_components/vtherm_smartpi/smartpi/diagnostics.py).
+
+### Contrat descriptif 0.4
+
+Voir [MEASUREMENT_METHODS.md](docs/MEASUREMENT_METHODS.md) pour les formules,
+la référence de consigne, la couverture, les exclusions et les publications primaires.
+
+| Vue | Source et unité | Garde |
+|---|---|---|
+| Qualité | Horodatage propre à la source, zéro conservé | 10 min, futur >60 s non vérifiable ; aucune requête réseau supplémentaire |
+| Relecture | Une publication Recorder ou session ; `history` et `live` archivés seuls | Aucune confiance ou liaison climate actuelle ; unité absente explicitement inconnue |
+| Comparaison pièces | Dernière heure de session, unité et contexte capturés à réception | Groupes °C/°F séparés ; premier instantané exclu ; manques, contexte et gaps >10 min coupent |
+| Réponse par consigne | Points prospectifs locaux : consigne climate normale confirmée, mode/unité/liaison enregistrés | Hors fenêtre on / sécurité true / délestage true ; inconnu signalé ; contexte non confirmé exclu |
+| Carnet Twin | ETA figée et première publication d’atteinte dans le Store existant | Meilleur cas et réel non équivalents ; aucun score ni horizon ou intervalle inventé |
+
+L’API admin retourne au plus1 200 points/48h avec projection fermée de champs
+non secrets. Aucun endpoint ou action supplémentaire. Les anciens points sans
+`bound` restent lisibles mais ne participent pas aux nouveaux bilans. Les ruptures
+de contexte laissent des séparateurs à température nulle, pas de fausses mesures.
+Les drapeaux optionnels viennent exclusivement des attributs climate publiés :
+`window_manager.window_state`, `safety_manager.is_safety_detected`,
+`power_manager.is_overpowering_detected`. Absence et type inattendu restent inconnus.

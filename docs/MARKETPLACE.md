@@ -1,3 +1,6 @@
+Version courante préparée : **0.4.0**. [Notes de version](releases/0.4.0.md).
+Le protocole de distribution de la première release ci-dessous reste applicable.
+
 # Diffusion Marketplace
 
 Préparation de la première release versionnée **0.3.4**, revue le 14 novembre 2026.

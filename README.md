@@ -8,6 +8,19 @@ Panneau de supervision SmartPI pour Home Assistant, avec sélection explicite de
 
 Ces captures utilisent uniquement des données de démonstration synthétiques.
 
+**Version 0.4.0** : modes nommés et colorés,
+consignes normale et filtrée, remplissage représentant la commande appliquée.
+Les vues sont descriptives : aucune énergie ni qualité globale du PI n’est déduite du seul pourcentage de commande.
+
+![Cartes des thermostats, modes et commandes appliquées](docs/images/thermostats.png)
+
+[Voir les cartes sur mobile en thème sombre](docs/images/thermostats-mobile.png)
+
+Lorsque SmartPI publie la phase de surveillance, les barres de collecte laissent
+place à un résumé compact ; mesures, fiabilité et motifs restent dépliables.
+
+![Surveillance du modèle avec détails dépliables](docs/images/surveillance-modele.png)
+
 **Schéma complet de la boucle** : visualisez le chemin de commande et le retour de mesure.
 
 ![Schéma complet de la boucle de régulation](docs/images/regulation-boucle.png)
@@ -20,6 +33,13 @@ Ces captures utilisent uniquement des données de démonstration synthétiques.
 
 ![Vue de supervision et graphique de température](docs/images/supervision.png)
 
+La version 0.4 ajoute une relecture historique, une comparaison des pièces sur
+axes communs et des bilans prospectifs par consigne. Le carnet Twin distingue
+meilleur cas annoncé et atteinte observée ; les scores impossibles à justifier
+restent indisponibles. [Méthodes, unités et exclusions](docs/MEASUREMENT_METHODS.md).
+
+[Relecture historique](docs/images/relecture-historique.png) · [Comparaison des pièces et bilans par épisode](docs/images/comparaison-episodes.png)
+
 ## Principes
 - Deux actions explicites : température et preset du thermostat sélectionné, via les services climate officiels.
 - Aucun changement automatique, planning, calibration ou réglage du régulateur.
@@ -30,7 +50,7 @@ Ces captures utilisent uniquement des données de démonstration synthétiques.
 
 ## État du développement
 
-**Version 0.3.4** — panneau natif avec graphiques température/consigne, commandes,
+**Version 0.4.0** — panneau natif avec graphiques température/consigne, commandes,
 écart filtré et modèle A/B sur 1–48 h. Zoom, déplacement, curseurs synchronisés,
 légende interactive, tables accessibles, schéma logique cliquable et chaîne U.
 Le trajet thermique réunit température mesurée, consigne brute du thermostat et presets publiés.

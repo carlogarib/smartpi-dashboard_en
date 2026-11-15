@@ -7,9 +7,12 @@ import "./components/thermal-journey";
 import type {ClimateConnection} from "./services/climate";
 import type {ObservatoryConnection} from "./services/observatory";
 import "./components/observatory";
+import "./components/publication-quality";
+import "./components/room-comparison";
 import type {ObservatoryElement} from "./components/observatory";
 import type {ThermalJourneyElement} from "./components/thermal-journey";
 import {SessionHistory, timestamp} from "./utils/timeseries";
+import {ThermalJourney} from "./utils/thermal-journey";
 import type {HistoryConnection} from "./services/history";
 
 type Field = {label: string, path: string, unit?: string, digits?: number, reliable?: string};
@@ -125,13 +128,16 @@ export class SmartPIDashboardPanel extends LitElement {
   @state() private selectedId = "";
 
   private sessionHistory = new SessionHistory();
-  protected willUpdate(changed: Map<string, unknown>) {
-    if(changed.has("hass") && this.hass) this.sessionHistory.collect(discover(this.hass), this.hass.states);
-  }
-  disconnectedCallback(){this.sessionHistory.clear();super.disconnectedCallback();}
+  private freshnessTimer?: ReturnType<typeof setInterval>;
+  connectedCallback(){super.connectedCallback();this.freshnessTimer=setInterval(()=>this.requestUpdate(),30_000);}
 
-  private metric(label: string, value: unknown, unit = "", digits = 2) {
-    return html`<div class="metric"><span>${label}</span><strong>${display(value,unit,digits)}</strong></div>`;
+  protected willUpdate(changed: Map<string, unknown>) {
+    if(changed.has("hass") && this.hass) this.sessionHistory.collect(discover(this.hass), this.hass.states,Date.now()/1000,this.hass.config?.unit_system?.temperature);
+  }
+  disconnectedCallback(){clearInterval(this.freshnessTimer);this.freshnessTimer=undefined;this.sessionHistory.clear();super.disconnectedCallback();}
+
+  private metric(label: string, value: unknown, unit = "", digits = 2, date = "") {
+    return html`<div class="metric"><span>${label}</span><strong>${display(value,unit,digits)}</strong><smartpi-publication-quality .now=${Date.now()/1000} .value=${value} .date=${date}></smartpi-publication-quality></div>`;
   }
 
   private power(label: string, value: unknown, cssName: string) {
@@ -153,24 +159,8 @@ export class SmartPIDashboardPanel extends LitElement {
     const notes = explanations(d);
     const bootstrap = inBootstrap(d);
 
-    const publication = timestamp(d.lastUpdated);
-    return html`
-      <section class="hero">
-        <div class="flex spread">
-          <div><div class="eyebrow">THERMOSTAT SÉLECTIONNÉ</div><h2>${d.name}</h2>
-            <div class="muted small">${d.climateId ?? d.entityId}</div></div>
-          <span class="tag">${bootstrap?"Apprentissage / hystérésis":display(at(v,"control.phase"))}</span>
-        </div>
-        <p class="muted small">Dernière publication ${publication === null ? "indisponible" : html`<time datetime=${d.lastUpdated ?? ""}>${publicationFormat.format(publication * 1000)}</time>`}</p>
-        <smartpi-thermal-journey .hass=${this.hass} .diagnostic=${d}
-          @observatory-refresh=${(event: CustomEvent<{entityId: string}>) => {if (event.detail.entityId === d.entityId) void this.renderRoot.querySelector<ObservatoryElement>("smartpi-observatory")?.refresh();}}></smartpi-thermal-journey>
-        <div class="metrics">
-          ${this.metric("Commande appliquée",at(v,"power.applied_percent")," %",1)}
-          ${this.metric("Température extérieure",at(v,"temperature.outdoor")," °C")}
-        </div>
-        <section class="learn" aria-label="Avancement de l’apprentissage">
-          <div class="flex spread"><h3>Apprentissage du modèle</h3>
-            <strong>${display(({bootstrap:"Initialisation", learning:"Collecte du modèle", monitoring:"Surveillance", degraded:"Modèle à consolider"} as Record<string,string>)[String(at(v, "learning.stage"))] ?? at(v, "learning.stage"))}</strong></div>
+    const monitoring = !bootstrap && at(v, "learning.stage") === "monitoring";
+    const learningDetails = html`
           <div class="columns">
             ${(["a", "b"] as const).map((key) => {
               const count = num(at(v, `learning.emea_samples_${key}`));
@@ -181,8 +171,8 @@ export class SmartPIDashboardPanel extends LitElement {
               return html`<div>
                 <div class="flex spread"><strong>${key.toUpperCase()} · ${key === "a" ? "chauffe" : "pertes thermiques"}</strong>
                   <span>${display(percent, " %", 0)}</span></div>
-                <progress aria-label=${`Historique de ${key.toUpperCase()}`}
-                  max=${target ?? 1} value=${valid ? Math.min(count, target) : nothing}></progress>
+                ${monitoring ? nothing : html`<progress aria-label=${`Historique de ${key.toUpperCase()}`}
+                  max=${target ?? 1} value=${valid ? Math.min(count, target) : nothing}></progress>`}
                 <p class="muted small">${display(count, "", 0)} / ${display(target, "", 0)} mesures conservées
                   · premier palier ${display(initial, "", 0)}
                   ${count !== null && initial !== null ? (count >= initial ? "atteint" : "en cours") : ""}</p>
@@ -220,6 +210,27 @@ export class SmartPIDashboardPanel extends LitElement {
           <p class="muted small">Si les compteurs restent à zéro, les états et motifs ci-dessus
             décrivent la dernière situation publiée. Une nouvelle mesure dépend d’une
             observation exploitable acceptée par SmartPI.</p>
+`;
+    const publication = timestamp(d.lastUpdated);
+    return html`
+      <section class="hero">
+        <div class="flex spread">
+          <div><div class="eyebrow">THERMOSTAT SÉLECTIONNÉ</div><h2>${d.name}</h2>
+            <div class="muted small">${d.climateId ?? d.entityId}</div></div>
+          <span class="tag">${bootstrap?"Apprentissage / hystérésis":display(at(v,"control.phase"))}</span>
+        </div>
+        <p class="muted small">Dernière publication ${publication === null ? "indisponible" : html`<time datetime=${d.lastUpdated ?? ""}>${publicationFormat.format(publication * 1000)}</time>`}</p>
+        <smartpi-thermal-journey .hass=${this.hass} .diagnostic=${d}
+          @observatory-refresh=${(event: CustomEvent<{entityId: string}>) => {if (event.detail.entityId === d.entityId) void this.renderRoot.querySelector<ObservatoryElement>("smartpi-observatory")?.refresh();}}></smartpi-thermal-journey>
+        <div class="metrics">
+          ${this.metric("Commande appliquée",at(v,"power.applied_percent")," %",1,d.lastUpdated ?? "")}
+          ${this.metric("Température extérieure",at(v,"temperature.outdoor"),new ThermalJourney(this.hass,d).unit ?? "",2,d.lastUpdated ?? "")}
+        </div>
+        <section class="learn" aria-label="Avancement de l’apprentissage">
+          <div class="flex spread"><h3>${monitoring ? "Surveillance du modèle" : "Apprentissage du modèle"}</h3>
+            <strong>${display(({bootstrap:"Initialisation", learning:"Collecte du modèle", monitoring:"Surveillance", degraded:"Modèle à consolider"} as Record<string,string>)[String(at(v, "learning.stage"))] ?? at(v, "learning.stage"))}</strong></div>
+          ${monitoring ? html`<p class="muted small">Collecte initiale achevée · le modèle reste sous surveillance.</p>
+            <details class="learning-details"><summary>Mesures, fiabilité et motifs <span class="chevron" aria-hidden="true">⌄</span></summary>${learningDetails}</details>` : learningDetails}
         </section>
       </section>
       <smartpi-observatory .hass=${this.hass} .diagnostic=${d}
@@ -246,6 +257,30 @@ export class SmartPIDashboardPanel extends LitElement {
     `;
   }
 
+  private thermostatTile(d: SmartPIDiagnostic, selected: boolean) {
+    const journey = new ThermalJourney(this.hass, d);
+    const mode = journey.available ? journey.climate!.state === "off" ? "off" : journey.attributes.preset_mode : undefined;
+    const modes: Record<string, string> = {frost:"Hors gel", eco:"Éco", comfort:"Confort", boost:"Boost", off:"Arrêt", none:"Manuel", activity:"Activité"};
+    const knownMode = typeof mode === "string" && Object.hasOwn(modes, mode);
+    const tone = knownMode ? mode : "unknown";
+    const label = knownMode ? modes[mode] : typeof mode === "string" && mode.trim() ? mode : "Mode indisponible";
+    const effort = journey.appliedEffort();
+    const published = timestamp(d.lastUpdated);
+    const stale = published !== null && Date.now() / 1000 - published > 600;
+    return html`<button type="button" class=${"tile mode-" + tone + (selected ? " selected" : "")}
+      @click=${() => {this.selectedId = d.entityId;}} aria-pressed=${selected}>
+      <span class="tile-level" style=${"height:" + (effort?.percent ?? 0) + "%"} aria-hidden="true"></span>
+      <strong class="tile-name">${d.name}</strong>
+      <span class="tile-mode">${label}<span class="tile-check" aria-hidden="true">${selected ? "✓" : ""}</span></span>
+      <span class="big">${display(journey.measured, journey.unit ? " " + journey.unit : "")}</span>
+      <span class="tile-target" title=${"Thermostat · " + (journey.climate?.last_updated ?? "Date absente")}>Consigne <b>${display(journey.target, journey.unit ? " " + journey.unit : "")}</b></span>
+      <span class="tile-bottom" title=${"SmartPI · " + (d.lastUpdated ?? "Date absente")}>Filtrée ${display(journey.filtered, journey.unit ? " " + journey.unit : "")}</span>
+      <span class="tile-command">Commande <b>${effort ? display(effort.percent, " %", 1) : "—"}</b></span>
+      <smartpi-publication-quality .now=${Date.now()/1000} .value=${journey.measured} .date=${d.lastUpdated ?? ""} .available=${d.available}></smartpi-publication-quality>
+      ${!effort ? html`<span class="tile-status">${!d.available ? "Diagnostic indisponible" : stale ? "Publication ancienne" : "Commande indisponible"}</span>` : nothing}
+    </button>`;
+  }
+
   render() {
     const list=discover(this.hass);
     const selected=list.find(d=>d.entityId===this.selectedId)??list[0];
@@ -257,12 +292,8 @@ export class SmartPIDashboardPanel extends LitElement {
           <span class="muted small">${list.length} diagnostic${list.length>1?"s":""} SmartPI v2</span></div>
         ${list.length===0 ? html`<section class="surface empty"><h3>Aucun diagnostic SmartPI v2 détecté</h3>
           <p>Rechercher les capteurs sensor.* dotés de schema_version=2 et des objets live/history dans les outils de développement de Home Assistant.</p></section>`:
-          html`<div class="tiles">${list.map(d=>html`<button type="button" class=${"tile "+(selected?.entityId===d.entityId?"selected":"")}
-           @click=${()=>{this.selectedId=d.entityId;}} aria-pressed=${selected?.entityId===d.entityId}>
-            <strong>${d.name}</strong>
-            <span class="big">${display(at(d.live,"temperature.indoor")," °C")}</span>
-            <span class="tile-bottom">Consigne filtrée ${display(at(d.live,"setpoint.filtered_setpoint")," °C")}</span>
-          </button>`)}</div>
+          html`<div class="tiles">${list.map(d => this.thermostatTile(d, selected?.entityId === d.entityId))}</div>
+          <smartpi-room-comparison .rooms=${list.map(d=>({id:d.entityId,name:d.name,unit:new ThermalJourney(this.hass,d).unit,samples:this.sessionHistory.get(d.entityId)}))} .end=${Date.now()/1000}></smartpi-room-comparison>
           ${selected?this.showDiagnostic(selected):nothing}`}
         <footer>Source : capteurs SmartPI Diagnostics v2 · Réglage de température et de preset sur sélection explicite</footer>
       </main>`;
@@ -285,8 +316,18 @@ export class SmartPIDashboardPanel extends LitElement {
       min-height:105px;padding:12px 14px;text-align:left;cursor:pointer;display:flex;flex-direction:column;gap:5px}
     button:focus-visible,summary:focus-visible{outline:3px solid var(--primary-color);outline-offset:3px}
     .tile{overflow-wrap:anywhere;min-width:0}
-    .tile:hover{border-color:var(--primary-color)}.tile.selected{box-shadow:inset 0 -3px var(--primary-color);border-color:var(--primary-color)}
-    .big{font-size:24px;font-weight:700;font-variant-numeric:tabular-nums}.tile-bottom{font-size:12px;margin-top:auto;color:var(--secondary-text-color)}
+    .tile{--mode-color:var(--secondary-text-color);position:relative;isolation:isolate;overflow:hidden;border:2px solid var(--mode-color);gap:7px}
+    .tile.mode-frost{--mode-color:#3288c5}.tile.mode-eco{--mode-color:#388653}
+    .tile.mode-comfort{--mode-color:#c3524b}.tile.mode-boost{--mode-color:#d22f43}
+    .tile:hover{box-shadow:0 2px 8px color-mix(in srgb,var(--mode-color) 30%,transparent)}
+    .tile.selected{box-shadow:0 0 0 2px var(--card-background-color),0 0 0 4px var(--primary-text-color)}
+    .tile-level{position:absolute;inset:auto 0 0;background:var(--mode-color);opacity:.12;z-index:-1;pointer-events:none}
+    .tile-name{line-height:1.3}.tile-mode{display:flex;align-items:center;justify-content:space-between;font-size:12px;font-weight:700}
+    .tile-check{min-width:14px}.tile-target,.tile-command{display:flex;flex-wrap:wrap;justify-content:space-between;gap:3px 7px;font-size:12px}
+    .tile-command{border-top:1px solid var(--divider-color);padding-top:8px;margin-top:3px}
+    .tile-status{font-size:11px;color:var(--secondary-text-color)}
+    .learning-details{border-top:1px solid var(--divider-color);padding-top:12px}.learning-details summary{font-size:13px;min-height:30px}
+    .big{font-size:24px;font-weight:700;font-variant-numeric:tabular-nums}.tile-bottom{font-size:12px;color:var(--secondary-text-color)}
     .hero,.surface{background:var(--card-background-color);border:1px solid var(--divider-color);border-radius:14px}
     .hero{padding:20px;border-inline-start:3px solid var(--primary-color)}.hero h2{margin:4px 0;font-size:25px;overflow-wrap:anywhere}
     .metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px;margin-top:14px}

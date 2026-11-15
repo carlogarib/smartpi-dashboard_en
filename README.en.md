@@ -6,6 +6,29 @@ A native Home Assistant sidebar panel for SmartPI diagnostics, learning progress
 Recorder charts and explicit temperature/preset selection. The dashboard UI is
 currently in French. Setup translations are provided in English and French.
 
+## Preview
+
+All screenshots use synthetic demonstration data. The following overview shows version 0.4.0.
+Named presets, raw and filtered targets, and a proportional applied-command fill
+remain distinct. The fill represents a control percentage, not measured watts.
+
+![Thermostat presets, targets and applied commands](docs/images/thermostats.png)
+
+[Dark mobile overview](docs/images/thermostats-mobile.png) · [Supervision and dated chart values](docs/images/supervision.png)
+
+The published monitoring stage uses a compact summary with expandable details.
+Active collection and degraded states keep their progress bars visible.
+
+![Compact model monitoring](docs/images/surveillance-modele.png)
+
+Version 0.4 adds timestamped historical replay, session room comparisons grouped
+by recorded unit, and prospective response summaries using the thermostat's raw
+target. Missing archived units stay unknown. The Twin notebook separates the
+published best-case ETA from observed arrival; no accuracy score or predictive
+interval is invented. [Methods and exclusions (French)](docs/MEASUREMENT_METHODS.md).
+
+[Historical replay](docs/images/relecture-historique.png) · [Room comparison and response episodes](docs/images/comparaison-episodes.png)
+
 ## Requirements
 
 - Home Assistant **2026.11.0 or newer** and an administrator account.
@@ -23,7 +46,7 @@ Add `gael1980/smartpi-dashboard` as a custom **Integration** repository under
 Open the sidebar panel as an administrator. Updates to a loaded custom integration
 require a Home Assistant restart.
 
-Version 0.3.4 is distributed as a [GitHub release](https://github.com/gael1980/smartpi-dashboard/releases).
+Version 0.4.0 is distributed as a [GitHub release](https://github.com/gael1980/smartpi-dashboard/releases).
 Marketplace can discover published updates for users who have installed this custom
 repository. Discovery is periodic, not immediate. The repository is not included
 in the default catalog. Home Assistant 2026.11.0 or newer is required.

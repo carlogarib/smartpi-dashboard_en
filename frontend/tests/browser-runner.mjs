@@ -74,6 +74,8 @@ const checks = {};
 try {
   await mkdir(output, { recursive: true });
   await send("Page.enable");
+  await send("Network.enable");
+  await send("Network.setCacheDisabled", {cacheDisabled:true});
   await send("Page.bringToFront");
   await send("Runtime.enable");
   await send("Emulation.setTimezoneOverride", { timezoneId: "UTC" });
@@ -103,6 +105,53 @@ try {
       && p.shadowRoot.querySelector('.learn').textContent.includes('premier palier 5');
   `);
   assert.ok(checks.learningProgress);
+  checks.datedLegend = await run(`
+    const c=root.querySelector('smartpi-time-chart');await c.updateComplete;
+    const publication=c.samples.filter(s=>s.time>=c.range[0]&&s.time<=c.range[1]).at(-1);
+    const legend=c.shadowRoot.querySelector('.publication-values');
+    return legend.querySelector('time').dateTime===new Date(publication.time*1000).toISOString()
+      &&!legend.textContent.includes('Indisponible')&&legend.textContent.includes('Dernière publication');
+  `);
+  assert.ok(checks.datedLegend);
+  checks.legendPartialAndZero = await run(`
+    const c=document.createElement('smartpi-time-chart');
+    c.range=[100,300];c.curves=[{label:'Commande',path:'power.applied_percent',unit:'%',color:'#2689ca'},
+      {label:'FF',path:'power.ff_percent',unit:'%',color:'#399986'}];
+    c.samples=[{time:100,state:'stable',live:{},history:{power:{applied_percent:35,ff_percent:12}}},
+      {time:200,state:'stable',live:{},history:{power:{applied_percent:0}}}];
+    p.shadowRoot.append(c);await c.updateComplete;
+    const legend=()=>c.shadowRoot.querySelector('.publication-values');
+    const partial=legend().textContent.includes('0 %')&&legend().textContent.includes('Absente à cet instant')
+      &&legend().querySelector('time').dateTime===new Date(200000).toISOString();
+    c.plot.setCursor({left:c.plot.valToPos(100,'x'),top:50});await c.updateComplete;
+    const inspected=legend().textContent.includes('35 %')&&legend().textContent.includes('12 %');
+    c.plot.setCursor({left:-10,top:-10});await c.updateComplete;
+    const retained=legend().textContent.includes('35 %');
+    c.range=[250,300];await c.updateComplete;
+    const empty=c.shadowRoot.textContent.includes('Aucune publication dans cette fenêtre.')&&!legend();
+    c.remove();return partial&&inspected&&retained&&empty;
+  `);
+  assert.ok(checks.legendPartialAndZero);
+  const touchPoint = await run(`
+    const c=document.createElement('smartpi-time-chart');c.inspectable=true;c.syncKey='touch-test';
+    c.range=[90,300];c.curves=[{label:'Commande',path:'power.applied_percent',unit:'%',color:'#2689ca'}];
+    c.samples=[{time:100,state:'stable',live:{},history:{power:{applied_percent:35}}},
+      {time:200,state:'stable',live:{},history:{power:{applied_percent:0}}}];
+    document.body.prepend(c);await c.updateComplete;c.scrollIntoView({block:'start'});
+    window.legendTouchChart=c;const b=c.plot.over.getBoundingClientRect();
+    return {x:b.left+c.plot.valToPos(100,'x'),y:b.top+50};
+  `);
+  await send('Emulation.setTouchEmulationEnabled',{enabled:true});
+  await send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[touchPoint]});
+  await send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+  await settle();
+  checks.legendTouch = await evaluate(`(async()=>{const c=window.legendTouchChart;await c.updateComplete;
+    const selected=c.shadowRoot.querySelector('.publication-values').textContent.includes('35 %');
+    c.remove();delete window.legendTouchChart;return selected;})()`);
+  assert.ok(checks.legendTouch);
+  await send('Emulation.setTouchEmulationEnabled',{enabled:false});
+
+
   assert.equal(checks.initial.charts, 3);
   assert.ok(checks.initial.canvas);
   assert.ok(checks.initial.rows > 5700);
@@ -233,6 +282,30 @@ try {
     return root.querySelector('#block-detail').textContent.includes('Pertes estimées B');
   `);
   assert.ok(checks.blockDetails);
+  checks.historicalReplay = await run(`
+    v.inspect(v.windowData(v.usingRecorder?v.recorder:v.session).samples[10].time);await v.updateComplete;
+    const bar=root.querySelector('.replay-bar');
+    if(!bar)throw Error("Historical banner missing");
+    bar.querySelector('button').click();await v.updateComplete;
+    const diagram=root.querySelector('.replay-bar smartpi-control-diagram');await diagram.updateComplete;
+    const selected=v.windowData(v.usingRecorder?v.recorder:v.session).samples.find(s=>s.time===v.inspection.time);
+    return {binding:diagram.diagnostic.climateId===null,time:diagram.diagnostic.lastUpdated===new Date(selected.time*1000).toISOString(),
+      value:diagram.diagnostic.live.power.applied_percent===(selected.history.power?.applied_percent ?? null),
+      banner:bar.textContent.includes('Historique')&&diagram.shadowRoot.textContent.includes('à cette publication')&&!diagram.shadowRoot.textContent.includes('en direct'),unit:diagram.diagnostic.temperatureUnit===null};
+  `);
+  assert.ok(Object.values(checks.historicalReplay).every(Boolean),JSON.stringify(checks.historicalReplay));
+  await run(`root.querySelector('.replay-bar input').focus();`);
+  const replayTime=await run(`return v.inspection.time;`);
+  await send('Input.dispatchKeyEvent',{type:'keyDown',key:'ArrowLeft',code:'ArrowLeft',windowsVirtualKeyCode:37});
+  await send('Input.dispatchKeyEvent',{type:'keyUp',key:'ArrowLeft',code:'ArrowLeft',windowsVirtualKeyCode:37});
+  checks.replayKeyboard=await run(`await v.updateComplete;return v.inspection.time<${replayTime};`);
+  assert.ok(checks.replayKeyboard);
+  const replayBounds=await run(`const b=root.querySelector('.replay-bar').getBoundingClientRect();return{x:b.x+scrollX,y:b.y+scrollY,width:b.width,height:b.height};`);
+  const replayShot=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:true,clip:{...replayBounds,scale:1}});
+  await writeFile(output+'/historical-replay.png',Buffer.from(replayShot.data,'base64'));
+  await run(`v.inspection=undefined;v.replay=false;await v.updateComplete;`);
+
+
   checks.sessionCalibration = await run(`
     const session = v.session;
     const time = v.range[1] - 30;
@@ -292,6 +365,7 @@ try {
   checks.piDetail = await run(
     `const d=root.querySelector('smartpi-control-diagram'),b=d.shadowRoot.querySelectorAll('g[role="button"]')[2];b.focus();b.dispatchEvent(new KeyboardEvent('keydown',{key:' ',bubbles:true}));await d.updateComplete;const detail=d.shadowRoot.querySelector('aside').textContent;return b.getAttribute('aria-pressed')==='true'&&d.shadowRoot.activeElement===b&&detail.includes('0,5 °C')&&detail.includes('0,8 °C')&&detail.includes('attributes.live.analysis.control.error_p')&&!!d.shadowRoot.querySelector('time[datetime]');`,
   );
+  if(!checks.piDetail) checks.piDiagnostic=await run(`const d=root.querySelector('smartpi-control-diagram');return {config:p.hass.config,fixtureConfig:fixture.hass.config,visualUnit:v.diagnostic.temperatureUnit,unit:d.diagnostic.temperatureUnit,detail:d.shadowRoot.querySelector('aside').textContent,focus:d.shadowRoot.activeElement?.tagName,selected:d.shadowRoot.querySelectorAll('g[role=button]')[2].getAttribute('aria-pressed')};`);
   assert.ok(checks.piDetail);
   checks.liveSeparation = await run(`return !root.querySelector('.tracking, .timeline')&&!!root.querySelector('smartpi-control-diagram')&&!!root.querySelector('.toolbar')&&!!root.querySelector('.command-comparison smartpi-time-chart')&&root.textContent.includes('Le schéma reste l’instantané actuel');`);
   assert.ok(checks.liveSeparation);
@@ -461,6 +535,10 @@ try {
     return {missing,selected};
   `);
   assert.ok(Object.values(checks.supervisionShortcut).every(Boolean), JSON.stringify(checks.supervisionShortcut));
+
+  checks.historyLoading = await run(`const pending=v.load();await v.updateComplete;
+    const visible=v.loading&&root.textContent.includes('Lecture de');await pending;return visible;`);
+  assert.ok(checks.historyLoading);
   await run(`v.tab='evolution';window.historyMode='error';await v.load();`);
   await settle();
   checks.permission = await run(
@@ -498,7 +576,7 @@ try {
   );
   assert.ok(checks.reactivity);
   checks.cleanup = await run(
-    `v.tab='evolution';await v.updateComplete;const charts=[...root.querySelectorAll('smartpi-time-chart')],xy=[...root.querySelectorAll('smartpi-diagnostic-projection')];p.remove();return charts.every(c=>!c.plot&&!c.observer)&&xy.every(c=>!c.observer)&&p.sessionHistory.get('sensor.salon').length===0;`,
+    `v.tab='evolution';await v.updateComplete;const charts=[...root.querySelectorAll('smartpi-time-chart')],xy=[...root.querySelectorAll('smartpi-diagnostic-projection')];p.remove();return charts.every(c=>!c.plot&&!c.observer)&&xy.every(c=>!c.observer)&&p.sessionHistory.get('sensor.salon').length===0&&p.freshnessTimer===undefined;`,
   );
   assert.ok(checks.cleanup);
   assert.equal(await evaluate("fixture.counts.writes"), 0);
@@ -514,6 +592,90 @@ try {
   checks.journeyInitial = await journey(`return {calls:f.calls.length,eta:r.querySelector('.eta')?.textContent.includes('35 min'),target:r.querySelector('.destination').textContent.includes('20'),measured:r.querySelector('.measured').textContent.includes('19,2')};`);
   assert.equal(checks.journeyInitial.calls, 0);
   assert.ok(checks.journeyInitial.eta && checks.journeyInitial.target && checks.journeyInitial.measured);
+  checks.learningCompact = await journey(`
+    const learn=()=>p.shadowRoot.querySelector('.learn');
+    const compact=learn().textContent.includes('Surveillance du modèle')&&!learn().querySelector('progress')
+      &&learn().querySelector('details')&&!learn().querySelector('details').open;
+    const original=structuredClone(f.sensor.attributes.live.learning);
+    for(const stage of ['learning','degraded','bootstrap',undefined]){
+      Object.assign(f.sensor.attributes.live.learning,{stage,emea_samples_a:31,emea_samples_b:31,history_target:31});
+      ${sync}
+      if(learn().querySelector('details')||learn().querySelectorAll('progress').length!==2)return false;
+    }
+    f.sensor.attributes.live.learning=original;${sync}return compact;
+  `);
+  assert.ok(checks.learningCompact);
+  checks.overviewCards = await journey(`
+    const tile=()=>p.shadowRoot.querySelector('.tile');
+    const original=structuredClone(f.sensor),climate=structuredClone(f.climate);
+    let good=tile().textContent.includes('Consigne')&&tile().textContent.includes('20 °C')
+      &&tile().textContent.includes('19,7 °C')&&tile().querySelector('.tile-level').style.height==='42%';
+    for(const [mode,label] of [['frost','Hors gel'],['eco','Éco'],['comfort','Confort'],['boost','Boost'],['custom','custom'],['none','Manuel']]){
+      f.climate.attributes.preset_mode=mode;${sync}
+      good&&=tile().textContent.includes(label)&&tile().classList.contains('mode-'+(mode==='custom'?'unknown':mode));
+    }
+    f.climate.state='off';${sync}good&&=tile().textContent.includes('Arrêt');
+    Object.assign(f.climate,structuredClone(climate));
+    for(const value of [0,null,-1,101]){
+      f.sensor.attributes.live.power.applied_percent=value;${sync}
+      good&&=tile().querySelector('.tile-level').style.height==='0%';
+      good&&=value===0?tile().textContent.includes('0 %'):tile().textContent.includes('Commande indisponible');
+    }
+    f.sensor.last_updated=new Date(Date.now()-700000).toISOString();${sync}
+    good&&=tile().textContent.includes('Publication ancienne')&&tile().querySelector('.tile-level').style.height==='0%';
+    f.sensor.state='unavailable';${sync}good&&=tile().textContent.includes('Diagnostic indisponible');
+    Object.assign(f.sensor,original);Object.assign(f.climate,climate);${sync}return good&&f.calls.length===0;
+  `);
+  assert.ok(checks.overviewCards);
+  // Render the overview with five synthetic thermostats; never a real HA state.
+  await journey(`
+    for(const [i,mode] of ['frost','eco','comfort','boost','none'].entries()){
+      if(!i){f.climate.attributes.preset_mode=mode;f.climate.attributes.friendly_name='Chambre parents';continue;}
+      const sensor=structuredClone(f.sensor),climate=structuredClone(f.climate);
+      sensor.entity_id='sensor.overview_'+i;climate.entity_id='climate.overview_'+i;
+      climate.attributes.specific_states.regulation_diagnostics=sensor.entity_id;
+      climate.attributes.friendly_name=['','Cuisine','Chambre avec un nom particulièrement long','Salon','Bureau'][i];
+      climate.attributes.preset_mode=mode;sensor.attributes.live.power.applied_percent=[0,15,45,80,0][i];
+      f.hass.states[sensor.entity_id]=sensor;f.hass.states[climate.entity_id]=climate;
+    }${sync}
+  `);
+  for(const theme of ['light','dark']){
+    await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:theme}]});
+    for(const [width,height] of [[1440,1000],[390,844],[320,844]]){
+      await send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:width<500});
+      await evaluate('scrollTo(0,0)');await settle();
+      assert.ok(await journey(`return document.documentElement.scrollWidth<=innerWidth&&[...p.shadowRoot.querySelectorAll('.tile')].every(t=>t.scrollWidth<=t.clientWidth+4);`),'Overview overflow '+width);
+      const shot=await send('Page.captureScreenshot',{format:'png'});
+      await writeFile(output+'/overview-'+theme+'-'+width+'.png',Buffer.from(shot.data,'base64'));
+    }
+  }
+
+  await journey(`p.shadowRoot.querySelectorAll('.tile')[2].focus();`);
+  await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,text:'\r'});
+  await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
+  checks.overviewKeyboard = await journey(`await p.updateComplete;
+    const tile=p.shadowRoot.querySelectorAll('.tile')[2];
+    return tile.getAttribute('aria-pressed')==='true'&&p.shadowRoot.activeElement===tile&&f.calls.length===0;`);
+  assert.ok(checks.overviewKeyboard);
+  await journey(`p.shadowRoot.querySelector('.learning-details summary').focus();`);
+  await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,text:'\r'});
+  await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
+  checks.learningDetailsKeyboard = await journey(`return p.shadowRoot.querySelector('.learning-details').open;`);
+  assert.ok(checks.learningDetailsKeyboard);
+  for(const [width,height] of [[1440,1000],[390,844],[320,844]]){
+    await send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:width<500});
+    const bounds=await journey(`const learn=p.shadowRoot.querySelector('.learn');learn.querySelector('details').open=false;
+      learn.scrollIntoView({block:'center'});const b=learn.getBoundingClientRect();return{x:b.x+scrollX,y:b.y+scrollY,width:b.width,height:b.height};`);
+    const shot=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:true,clip:{...bounds,scale:1}});
+    await writeFile(output+'/monitoring-'+width+'.png',Buffer.from(shot.data,'base64'));
+  }
+  await journey(`
+    for(const key of Object.keys(f.hass.states))if(key.includes('overview_'))delete f.hass.states[key];
+    f.climate.attributes.preset_mode='comfort';f.climate.attributes.friendly_name='Salon';${sync}
+  `);
+  await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:'light'}]});
+  await send('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
+
   checks.journeyMaintenance = await journey(`
     const saved=structuredClone(f.sensor.attributes.live),target=f.climate.attributes.temperature;
     const live=f.sensor.attributes.live;
@@ -792,6 +954,35 @@ try {
   }
   checks.twinUnavailable = await journey(`f.sensor.attributes.live.analysis.twin.twin_model_reliable=false;${sync}return !r.querySelector('.twin-arrow')&&!r.querySelector('.eta')&&r.textContent.includes('modèle fiable');`);
   assert.ok(checks.twinUnavailable);
+
+  checks.evidenceViews = await evaluate(`(async()=>{
+    const wrap=document.createElement('div');wrap.id='evidence-scene';wrap.style.cssText='padding:20px;max-width:1220px;margin:auto;color:var(--primary-text-color);background:var(--card-background-color)';
+    const c=document.createElement('smartpi-room-comparison'),e=document.createElement('smartpi-response-episodes');
+    const end=Date.now()/1000;
+    const samples=(unit,offset)=>Array.from({length:40},(_,i)=>({time:end-3600+i*90,state:'stable',unit,context:unit,live:{},history:{temperature:{indoor:19+offset+Math.sin(i/5)*.4},setpoint:{filtered_setpoint:20},power:{applied_percent:i===20?null:10+i}}}));
+    c.rooms=[{id:'a',name:'Cuisine — démonstration',unit:'°C',samples:samples('°C',0)},{id:'b',name:'Salon — démonstration',unit:'°C',samples:samples('°C',.3)},{id:'c',name:'Pièce en Fahrenheit',unit:'°F',samples:samples('°F',0)}];c.end=end;
+    e.points=Array.from({length:30},(_,i)=>({time:end-1800+i*60,temperature:18+i*.1,target:i<20?20:21,outdoor:8,applied:40,mode:'heat',unit:'°C',climate_id:'climate.demo',bound:true,window:'off',safety:false,overpowering:false}));
+    wrap.append(c,e);document.body.prepend(wrap);await c.updateComplete;await e.updateComplete;
+    c.shadowRoot.querySelector('details').open=true;
+    const groups=c.shadowRoot.querySelectorAll('.rooms'),rows=e.shadowRoot.querySelectorAll('li');
+    const ok=groups.length===2&&c.shadowRoot.querySelectorAll('svg').length===3&&rows.length===2&&e.shadowRoot.textContent.includes('première observation');
+    window.evidenceScene={wrap,c,e};return ok;
+  })()`);
+  assert.ok(checks.evidenceViews);
+  for(const theme of ['light','dark']){
+    await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:theme},{name:'prefers-reduced-motion',value:'reduce'}]});
+    for(const [width,height] of [[1440,1000],[390,844],[320,844]]){
+      await send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:width<500});
+      const b=await evaluate(`(()=>{const e=evidenceScene.wrap;e.scrollIntoView({block:'start'});const b=e.getBoundingClientRect();return {x:b.x+scrollX,y:b.y+scrollY,width:b.width,height:b.height};})()`);
+      assert.ok(await evaluate('document.documentElement.scrollWidth<=innerWidth'),'Evidence overflow '+width);
+      const shot=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:true,clip:{...b,scale:1}});
+      await writeFile(output+'/evidence-'+theme+'-'+width+'.png',Buffer.from(shot.data,'base64'));
+    }
+  }
+  await evaluate('evidenceScene.wrap.remove();delete window.evidenceScene;');
+  checks.forecastScientificScope = await journey(`const o=p.shadowRoot.querySelector('smartpi-observatory');o.tab='forecasts';await o.updateComplete;
+    return o.shadowRoot.textContent.includes('aucun score de précision')&&o.shadowRoot.textContent.includes('horizon n’est pas publié');`);
+  assert.ok(checks.forecastScientificScope);
   assert.equal(errors.length, 0, JSON.stringify(errors.slice(0, 2).map(error => error.exception?.description ?? error.text)));
   await writeFile(
     output + "/checks.json",

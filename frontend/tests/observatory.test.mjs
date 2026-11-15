@@ -86,3 +86,12 @@ test('unknown codes and preset identifiers do not resolve Object prototype prope
  assert.deepEqual(f.view().reasons.map(r=>r.label),['constructor','__proto__']);
  f.climate.attributes.preset_modes=['constructor'];assert.equal(f.model().presets[0].label,'constructor');
 });
+
+test('bounded prospective points reject malformed context and accept legacy missing points',()=>{
+ const base={current:null,bookmarks:[],receipts:[],trials:[],forecasts:[]};
+ assert.ok(ObservatoryClient.room(base));
+ const p={time:1,temperature:0,target:20,outdoor:null,applied:0,unit:'°C',mode:'heat',climate_id:'climate.demo',bound:true,window:'off',safety:false,overpowering:false};
+ assert.equal(ObservatoryClient.room({...base,points:[p]}).points[0].temperature,0);
+ for(const bad of [{...p,time:NaN},{...p,temperature:'0'},{...p,bound:'yes'}])assert.throws(()=>ObservatoryClient.room({...base,points:[bad]}));
+ assert.throws(()=>ObservatoryClient.room({...base,points:Array(1201).fill(p)}));
+});

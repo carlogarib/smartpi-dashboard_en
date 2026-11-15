@@ -1,3 +1,4 @@
+import type {ObservationPoint} from "../utils/evidence";
 import {record, type HassLike, type Rec} from "../adapter";
 
 export type ObservatoryAction = "get" | "clear" | "bookmark_save" | "bookmark_delete" | "trial_start" | "trial_stop" | "trial_feedback" | "trial_delete" | "forecast_delete" | "receipt_delete" | "receipt_begin" | "receipt_finish";
@@ -8,7 +9,7 @@ export interface Bookmark {id: string; label: string; created_at: number; temper
 export interface Receipt {id: string; started_at: number; status: string; choice: {kind: string; value: number | string}; unit: string | null; service_result: string; confirmed_at: number | null; applied_at?: number; applied_percent?: number; response_at?: number; response_temperature?: number; reason?: string}
 export interface Trial {id: string; label: string; started_at: number; ended_at?: number; status: string; reason?: string; target: number; unit: string; baseline: number | null; outdoor: number | null; feedback: string; missing_publications?: number; summary: {publications: number; first_at: number | null; last_at: number | null; minimum: number | null; maximum: number | null; last: number | null; max_abs_error: number | null; outdoor_min: number | null; outdoor_max: number | null}}
 export interface Forecast {id: string; started_at: number; target: number; temperature: number; outdoor: number | null; unit: string; eta_s: number; status: string; reason?: string; observed_at?: number; observed_s?: number}
-export interface ObservatoryRoom {current: Rec | null; bookmarks: Bookmark[]; receipts: Receipt[]; trials: Trial[]; forecasts: Forecast[]}
+export interface ObservatoryRoom {points?: ObservationPoint[]; current: Rec | null; bookmarks: Bookmark[]; receipts: Receipt[]; trials: Trial[]; forecasts: Forecast[]}
 
 /** Authenticated, admin-only metadata API. Never issues a climate command. */
 export class ObservatoryClient {
@@ -39,6 +40,11 @@ export class ObservatoryClient {
       trials: [50, r => common(r) && text(r.label) && finite(r.target) && unit(r.unit) && nullableNumber(r.baseline) && nullableNumber(r.outdoor) && ["pending", "finished", "excluded"].includes(String(r.status)) && ["unknown", "good", "cold", "hot"].includes(String(r.feedback)) && optional(r, "missing_publications", v => Number.isSafeInteger(v) && (v as number) >= 0) && record(r.summary) && Number.isSafeInteger(r.summary.publications) && (r.summary.publications as number) >= 0 && ["minimum", "maximum", "last", "max_abs_error", "outdoor_min", "outdoor_max"].every(k => nullableNumber((r.summary as Rec)[k])) && ["first_at", "last_at"].every(k => (r.summary as Rec)[k] === null || time((r.summary as Rec)[k]))],
       forecasts: [100, r => common(r) && finite(r.target) && finite(r.temperature) && unit(r.unit) && finite(r.eta_s) && (r.eta_s as number) > 0 && (r.eta_s as number) <= 172800 && ["pending", "reached", "excluded"].includes(String(r.status)) && optional(r, "outdoor", nullableNumber) && (r.status !== "reached" || (time(r.observed_at) && finite(r.observed_s) && (r.observed_s as number) >= 0))],
     };
+    const point = (p: unknown) => record(p) && time(p.time) && ["temperature","target","outdoor","applied"].every(k=>nullableNumber(p[k])) &&
+      ["unit","mode","climate_id","preset","window"].every(k=>p[k]===null || optional(p,k,text)) &&
+      ["bound","safety","overpowering"].every(k=>p[k]===null || optional(p,k,v=>typeof v==="boolean"));
+    if (record(value) && value.points !== undefined && (!Array.isArray(value.points) || value.points.length>1200 || !value.points.every(point)))
+      throw new Error("Points d’observation non reconnus.");
     if (!record(value) || (value.current !== null && !record(value.current)) || !Object.entries(groups).every(([k, [limit, check]]) => Array.isArray(value[k]) && value[k].length <= limit && value[k].every(v => record(v) && check(v))))
       throw new Error("Réponse de l’observatoire non reconnue. Rechargez après la mise à jour du composant.");
     return value as unknown as ObservatoryRoom;

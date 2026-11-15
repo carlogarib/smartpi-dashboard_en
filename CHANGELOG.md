@@ -9,6 +9,32 @@ L’étape 0.2.6 est attestée par les notes locales, mais n’a pas de commit o
 propre dans ce dépôt. Les pushes initiaux ne créaient pas de release GitHub.
 Seules les étapes dont une trace est conservée sont décrites.
 
+## 0.4.0 — 2026-11-15 — Lecture des données et observations descriptives
+
+- Cartes des thermostats : mode nommé et contour coloré, consigne normale et
+  filtrée, commande appliquée avec remplissage proportionnel depuis le bas.
+  Sélection indépendante ; commande zéro distincte d’une valeur absente/ancienne.
+- Légende datée : dernière publication de la fenêtre par défaut, point consulté
+  conservé au toucher et à la sortie du curseur. Champs manquants indiqués à
+  cet instant, sans remplissage des trous ni mélange Recorder/session.
+- Phase publiée de surveillance : résumé compact et détails dépliables, sans
+  les deux barres de collecte. Collecte, bootstrap et modèle à consolider restent
+  développés, même lorsque les compteurs atteignent 100 %.
+- Fraîcheur et provenance proches des valeurs, qualité de la fenêtre explicite,
+  relecture du schéma sur publication archivée avec navigation clavier.
+- Comparaison des pièces sur axes communs, séparée par unité enregistrée,
+  dernière heure de session uniquement ; aucun classement de performance.
+- Bilans prospectifs par consigne normale : plage mesurée, première présence
+  dans une tolérance de lecture, dépassement orienté et exclusions explicites.
+- Carnet Twin avec repères annoncé/observé ; aucun score entre scénarios
+  différents ni prévision à horizon fixe inventée.
+- Export admin borné des points déjà observés, contexte enregistré et séparateurs
+  sans mesure lors des interruptions. Anciens carnets préservés.
+- Unité absente des archives nommée « unité source », sans héritage de l’unité actuelle.
+- [Méthodes, limites et références](docs/MEASUREMENT_METHODS.md).
+- Vérifications navigateur synthétiques : clair/sombre, desktop/mobile, clavier,
+  toucher, données partielles, zéro et péremption. Publication et installation distinctes des tests synthétiques.
+
 ## 0.3.4 — 2026-11-14 — Maintien de consigne et projection Twin
 
 Première version préparée pour une release GitHub versionnée, installable via Marketplace en dépôt personnalisé.

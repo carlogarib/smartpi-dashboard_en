@@ -129,13 +129,16 @@ export class ControlPresentation {
     if (value === "SAT_LO") return "Saturation basse déclarée";
     return null;
   }
+  private unit(value: string | undefined) {
+    return value?.replace("°C",this.diagnostic.temperatureUnit === undefined ? "°C" : this.diagnostic.temperatureUnit ?? "unité source");
+  }
   detail(block: ControlBlock, expert: boolean) {
     const id = block.id === "command" && this.bypass ? "direct" : block.id;
     const fields = signals[id] ?? [];
     return (expert ? fields : fields.slice(0, overviewSize[id] ?? 4)).map(
       ([label, path, unit, digits, reliability]) => {
         const value = reliableValue(this.live, path, reliability);
-        return { label, path, reliability, value: display(unit === undefined ? value : num(value), unit, digits) };
+        return { label, path, reliability, value: display(unit === undefined ? value : num(value), this.unit(unit), digits) };
       },
     );
   }
@@ -155,7 +158,7 @@ export class ControlPresentation {
       id,
       title,
       path,
-      value: display(num(at(v, path)), unit, path === "model.a" ? 6 : 2),
+      value: display(num(at(v, path)), this.unit(unit), path === "model.a" ? 6 : 2),
       explanation,
       reason: display(at(v, reasonPath)),
       reasonPath,

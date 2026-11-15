@@ -67,6 +67,10 @@ class Observatory:
                 "temperature": n(self.at(live, "temperature.indoor")), "outdoor": n(self.at(live, "temperature.outdoor")), "target": n(attrs.get("temperature")) if available else None,
                 "filtered": n(self.at(live, "setpoint.filtered_setpoint")), "preset": attrs.get("preset_mode"), "mode": climate.state if climate else None, "unit": unit if unit in ("°C", "°F") else None,
                 "applied": n(self.at(live, "power.applied_percent")),
+                "bound": climate is not None and sensor.last_updated >= climate.last_updated,
+                "window": self.at(attrs, "window_manager.window_state") if self.at(attrs, "window_manager.window_state") in ("on", "off") else None,
+                "safety": self.at(attrs, "safety_manager.is_safety_detected") if type(self.at(attrs, "safety_manager.is_safety_detected")) is bool else None,
+                "overpowering": self.at(attrs, "power_manager.is_overpowering_detected") if type(self.at(attrs, "power_manager.is_overpowering_detected")) is bool else None,
                 "twin": {"status": twin("twin_status"), "model_reliable": twin("twin_model_reliable"), "warming_up": twin("twin_warming_up"), "tau_reliable": self.at(live, "model.tau_reliable"), "eta_s": n(twin("eta_s")), "reason": twin("eta_reason")}}
 
     async def start(self):

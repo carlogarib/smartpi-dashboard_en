@@ -35,6 +35,15 @@ class ObservatoryTests(unittest.IsolatedAsyncioTestCase):
         self.hass.states.async_set("climate.other", "heat", self.climate_attrs)
         self.assertFalse(self.observer.snapshot("sensor.demo")["available"])
 
+    async def test_snapshot_records_only_published_context_flags_and_bound_target(self):
+        self.climate_attrs.update(window_manager={"window_state": "on"}, safety_manager={"is_safety_detected": True}, power_manager={"is_overpowering_detected": False})
+        self.hass.states.async_set("climate.demo", "heat", self.climate_attrs)
+        self.assertFalse(self.observer.snapshot("sensor.demo")["bound"])
+        self.hass.states.async_set("sensor.demo", "fresh", self.sensor_attrs)
+        p = self.observer.snapshot("sensor.demo")
+        self.assertTrue(p["bound"])
+        self.assertEqual((p["window"], p["safety"], p["overpowering"]), ("on", True, False))
+
     async def test_bookmark_round_trip_via_native_store(self):
         from homeassistant.helpers.storage import Store
         result = await self.observer.request("sensor.demo", "bookmark_save", {"label": "Lecture"})

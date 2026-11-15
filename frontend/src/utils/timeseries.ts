@@ -21,6 +21,8 @@ export const HISTORY_PATHS = [
 export interface Sample {
   time: number;
   observedAt?: boolean;
+  unit?: string | null;
+  context?: string;
   state: string;
   history: Rec;
   live: Rec;
@@ -174,6 +176,7 @@ export class SessionHistory {
     diagnostics: SmartPIDiagnostic[],
     states: Record<string, HAState>,
     now = Date.now() / 1000,
+    unitFallback?: string,
   ) {
     const present = new Set(diagnostics.map((d) => d.entityId));
     for (const id of this.buffers.keys())
@@ -195,9 +198,14 @@ export class SessionHistory {
       // An entity may predate this session: first point is its time of observation.
       if (samples.length && time <= samples[samples.length - 1].time) continue;
       const seenTime = samples.length === 0 ? now : time;
+      const climate = d.climateId ? states[d.climateId] : undefined;
+      const configured = at(climate?.attributes, "configuration.temperature_unit") ?? climate?.attributes.temperature_unit;
+      const unit = configured ?? unitFallback;
       const next = {
         time: seenTime,
         observedAt: samples.length === 0,
+        unit: unit === "°C" || unit === "°F" ? unit : null,
+        context: JSON.stringify([d.climateId,climate?.state,unit]),
         state: d.state,
         history: d.available ? d.history : {},
         live: d.live,

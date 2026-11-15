@@ -25,6 +25,33 @@ class ObservationTests(unittest.TestCase):
     def action(self, action, payload=None, now=1000):
         return self.book.action("sensor.demo", action, payload or {}, now)
 
+    def test_bounded_points_export_is_detached_and_does_not_expose_extra_fields(self):
+        self.book.observe("sensor.demo", point(1001, bound=True, window="off", safety=False, overpowering=False, secret="never exported"), True)
+        exported = self.book.export("sensor.demo")["points"]
+        self.assertEqual(len(exported), 1)
+        self.assertEqual(exported[0]["climate_id"], "climate.demo")
+        self.assertIs(exported[0]["bound"], True)
+        self.assertNotIn("secret", exported[0])
+        exported[0]["temperature"] = 0
+        self.assertEqual(self.room["points"][0]["temperature"], 19)
+        ObservationBook(self.book.data, 1002)
+
+    def test_context_updates_and_unavailable_publications_record_breaks_without_measurement(self):
+        self.book.observe("sensor.demo", point(1001, bound=True), True)
+        self.book.observe("sensor.demo", point(1001, observed_at=1002, target=21), False)
+        boundary = self.room["points"][-1]
+        self.assertIsNone(boundary["temperature"])
+        self.assertIs(boundary["bound"], False)
+        self.assertEqual(boundary["time"], 1002)
+        self.book.observe("sensor.demo", point(1003, available=False), True)
+        self.assertIsNone(self.room["points"][-1]["temperature"])
+
+    def test_invalid_stored_point_context_is_rejected_before_loading(self):
+        self.book.observe("sensor.demo", point(1001, bound=True), True)
+        self.room["points"][0]["bound"] = "yes"
+        with self.assertRaises(ValueError):
+            ObservationBook(self.book.data)
+
     def test_startup_is_not_a_historical_forecast(self):
         self.assertEqual(self.room["forecasts"], [])
         self.assertEqual(self.room["points"], [])

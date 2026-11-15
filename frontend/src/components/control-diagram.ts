@@ -6,6 +6,7 @@ import { ControlPresentation, type ControlBlock } from "../utils/control";
 export class ControlDiagram extends LitElement {
   @property({ attribute: false }) diagnostic?: SmartPIDiagnostic;
   @property({ type: Boolean }) expert = false;
+  @property({ type: Boolean }) historical = false;
   @state() private selected?: { context: string; id: string };
   render() {
     if (!this.diagnostic) return nothing;
@@ -46,7 +47,7 @@ export class ControlDiagram extends LitElement {
     const updated = this.diagnostic.lastUpdated;
     const time = updated ? new Date(updated) : null;
     const timestamp = this.diagnostic.available && time && Number.isFinite(time.valueOf())
-      ? html`Dernière mise à jour du capteur : <time datetime=${time.toISOString()}>${new Intl.DateTimeFormat("fr-FR", {dateStyle: "short", timeStyle: "medium"}).format(time)}</time>`
+      ? html`${this.historical ? "Publication archivée" : "Dernière mise à jour du capteur"} : <time datetime=${time.toISOString()}>${new Intl.DateTimeFormat("fr-FR", {dateStyle: "short", timeStyle: "medium"}).format(time)}</time>`
       : "Horodatage des données actuelles indisponible";
     const positions = [
       [20, 20],
@@ -61,7 +62,7 @@ export class ControlDiagram extends LitElement {
     return html`<div class="intro">
         <div>
           <span class="eyebrow">COMPRENDRE LA COMMANDE</span>
-          <h3>Le régulateur, en direct</h3>
+          <h3>${this.historical ? "Le régulateur, à cette publication" : "Le régulateur, en direct"}</h3>
         </div>
         <span class="badge route-badge">${routeLabel}</span>
       </div>

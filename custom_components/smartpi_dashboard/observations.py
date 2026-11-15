@@ -95,6 +95,9 @@ class ObservationBook:
                     if group == "points":
                         require(timestamp(item.get("time")))
                         require(all(nullable(item.get(k)) for k in ("temperature", "target", "outdoor", "applied")))
+                        require(all(item.get(k) is None or type(item[k]) is bool for k in ("bound", "safety", "overpowering")))
+                        require(item.get("window") in (None, "on", "off"))
+                        require(all(item.get(k) is None or text(item[k]) for k in ("mode", "unit", "climate_id", "preset")))
                         continue
                     require(text(item.get("id")))
                     require(timestamp(item.get("created_at" if group == "bookmarks" else "started_at")))
@@ -174,6 +177,10 @@ class ObservationBook:
         context = [point.get(k) for k in ("climate_id", "mode", "target", "unit")]
         if previous and context != [previous.get(k) for k in ("climate_id", "mode", "target", "unit")]:
             room["forecast_context"] = None
+        if previous and (context != [previous.get(k) for k in ("climate_id", "mode", "target", "unit")] or not point["available"]):
+            # A discontinuity is an observed boundary, never a fabricated temperature.
+            room["points"].append({"time": point["observed_at"], "temperature": None, "target": None, "outdoor": None, "applied": None, "bound": False})
+            room["points"] = room["points"][-self.MAX_POINTS:]
         for group in ("trials", "forecasts"):
             for item in room[group]:
                 if item["status"] == "pending" and item["context"] != context:
@@ -207,7 +214,7 @@ class ObservationBook:
         if point["observed_at"] - point["time"] > self.GAP_S or point["time"] > point["observed_at"] + 60:
             return
         # A publication older than an episode start is never retrospective evidence.
-        room["points"].append({k: point.get(k) for k in ("time", "temperature", "target", "outdoor", "applied", "mode", "unit")})
+        room["points"].append({k: point.get(k) for k in ("time", "temperature", "target", "outdoor", "applied", "mode", "unit", "climate_id", "preset", "bound", "window", "safety", "overpowering")})
         room["points"] = room["points"][-self.MAX_POINTS:]
         for receipt in room["receipts"]:
             if receipt["status"] != "pending" or receipt.get("confirmed_at") is None or point["time"] < receipt["confirmed_at"]:
@@ -327,7 +334,9 @@ class ObservationBook:
 
     def export(self, entity_id):
         room = deepcopy(self.room(entity_id))
-        room.pop("points", None)
+        # Admin-only bounded projection; never return arbitrary stored attributes.
+        fields = ("time", "temperature", "target", "outdoor", "applied", "mode", "unit", "climate_id", "preset", "bound", "window", "safety", "overpowering")
+        room["points"] = [{key: point.get(key) for key in fields} for point in room["points"][-self.MAX_POINTS:]]
         room.pop("revision", None)
         room.pop("forecast_context", None)
         for trial in room["trials"]:
