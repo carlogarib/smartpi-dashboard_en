@@ -33,3 +33,20 @@ test('historical model points do not receive the current confidence retroactivel
 test('projection selection data stays chronological and does not merge an observation timestamp into a publication plateau',()=>{
  const d=new DiagnosticProjection([sample(2),sample(1,{observedAt:true})],'model');assert.deepEqual(d.points.map(p=>p.time),[1,2]);assert.equal(d.points[0].observedAt,true);
 });
+
+test('projection units come from archived points and incompatible units refuse a shared axis',()=>{
+ const f=new DiagnosticProjection([sample(1,{unit:'°F'}),sample(2,{unit:'°F'})],'model');
+ assert.equal(f.unit,'°F');assert.equal(f.compatibleUnits,true);assert.equal(f.valid,2);
+ const unknown=new DiagnosticProjection([sample(1)],'scatter');assert.equal(unknown.unit,'unité source');
+ for(const kind of ['model','scatter']){
+  for(const unit of ['°F',undefined]){
+   const mixed=new DiagnosticProjection([sample(1,{unit:'°C'}),sample(2,{unit})],kind);
+   assert.equal(mixed.compatibleUnits,false);assert.equal(mixed.valid,0);assert.equal(mixed.points.length,0);
+  }
+ }
+});
+
+test('A/B plateaus and trajectories never join distinct recorded contexts',()=>{
+ const d=new DiagnosticProjection([sample(1,{unit:'°C',context:'room/heat'}),sample(2,{unit:'°C',context:'room/cool'})],'model');
+ assert.equal(d.points.length,2);assert.notEqual(d.points[0].segment,d.points[1].segment);
+});

@@ -3,27 +3,32 @@ import {record, type HassLike, type Rec} from "../adapter";
 
 export type ObservatoryAction = "get" | "clear" | "bookmark_save" | "bookmark_delete" | "trial_start" | "trial_stop" | "trial_feedback" | "trial_delete" | "forecast_delete" | "receipt_delete" | "receipt_begin" | "receipt_finish";
 export interface ObservatoryConnection {
-  callWS<T>(message: {type: "smartpi_dashboard/observatory"; entity_id: string; action: ObservatoryAction; payload: Rec}): Promise<T>;
+  callWS<T>(message: {type: "smartpi_dashboard/observatory"; entity_id?: string; action: ObservatoryAction; payload: Rec}): Promise<T>;
 }
 export interface Bookmark {id: string; label: string; created_at: number; temperature: number; target: number; preset: string | null; outdoor: number | null; unit: string}
 export interface Receipt {id: string; started_at: number; status: string; choice: {kind: string; value: number | string}; unit: string | null; service_result: string; confirmed_at: number | null; applied_at?: number; applied_percent?: number; response_at?: number; response_temperature?: number; reason?: string}
 export interface Trial {id: string; label: string; started_at: number; ended_at?: number; status: string; reason?: string; target: number; unit: string; baseline: number | null; outdoor: number | null; feedback: string; missing_publications?: number; summary: {publications: number; first_at: number | null; last_at: number | null; minimum: number | null; maximum: number | null; last: number | null; max_abs_error: number | null; outdoor_min: number | null; outdoor_max: number | null}}
 export interface Forecast {id: string; started_at: number; target: number; temperature: number; outdoor: number | null; unit: string; eta_s: number; status: string; reason?: string; observed_at?: number; observed_s?: number}
 export interface ObservatoryRoom {points?: ObservationPoint[]; current: Rec | null; bookmarks: Bookmark[]; receipts: Receipt[]; trials: Trial[]; forecasts: Forecast[]}
+export interface OrphanRoom {entity_id: string; bookmarks: number; trials: number; forecasts: number; receipts: number; points: number}
 
 /** Authenticated, admin-only metadata API. Never issues a climate command. */
 export class ObservatoryClient {
   constructor(private hass: HassLike & Partial<ObservatoryConnection>) {}
-  async request(entityId: string, action: ObservatoryAction, payload: Rec = {}): Promise<unknown> {
-    if (!entityId.startsWith("sensor.") || typeof this.hass.callWS !== "function") throw new Error("L’observatoire local n’est pas disponible dans cette connexion.");
+  async request(entityId: string | undefined, action: ObservatoryAction, payload: Rec = {}): Promise<unknown> {
+    if ((entityId === undefined ? action !== "get" || Object.keys(payload).length > 0 : !entityId.startsWith("sensor.")) || typeof this.hass.callWS !== "function") throw new Error("L’observatoire local n’est pas disponible dans cette connexion.");
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      return await Promise.race([this.hass.callWS<unknown>({type: "smartpi_dashboard/observatory", entity_id: entityId, action, payload}),
+      return await Promise.race([this.hass.callWS<unknown>({type: "smartpi_dashboard/observatory", ...(entityId === undefined ? {} : {entity_id: entityId}), action, payload}),
         new Promise<never>((_, reject) => {timer = setTimeout(() => reject(new Error(action === "get" ? "L’observatoire ne répond pas. Réessayez." : "Résultat non confirmé. Actualisez le carnet avant de réessayer.")), 8000);})]);
     } catch (error) {
       if (record(error) && typeof error.message === "string" && !(error instanceof Error)) throw new Error(error.message.slice(0, 300));
       throw error;
     } finally { clearTimeout(timer); }
+  }
+  static orphans(value: unknown): OrphanRoom[] {
+    if (!record(value) || !Array.isArray(value.orphans) || value.orphans.length > 32 || !value.orphans.every(r => record(r) && typeof r.entity_id === "string" && /^sensor\.[a-z0-9_]+$/.test(r.entity_id) && r.entity_id.length <= 255 && ["bookmarks","trials","forecasts","receipts","points"].every(key => Number.isSafeInteger(r[key]) && (r[key] as number) >= 0 && (r[key] as number) <= 1200))) throw new Error("Liste des carnets non reconnue. Vérifiez la version du composant.");
+    return value.orphans as OrphanRoom[];
   }
   static room(value: unknown): ObservatoryRoom {
     const text = (v: unknown) => typeof v === "string" && v.length > 0 && v.length <= 100;
@@ -42,7 +47,7 @@ export class ObservatoryClient {
     };
     const point = (p: unknown) => record(p) && time(p.time) && ["temperature","target","outdoor","applied"].every(k=>nullableNumber(p[k])) &&
       ["unit","mode","climate_id","preset","window"].every(k=>p[k]===null || optional(p,k,text)) &&
-      ["bound","safety","overpowering"].every(k=>p[k]===null || optional(p,k,v=>typeof v==="boolean"));
+      ["bound","safety","overpowering"].every(k=>p[k]===null || optional(p,k,v=>typeof v==="boolean")) && optional(p,"suspensions_observed_at",v=>v===null||time(v));
     if (record(value) && value.points !== undefined && (!Array.isArray(value.points) || value.points.length>1200 || !value.points.every(point)))
       throw new Error("Points d’observation non reconnus.");
     if (!record(value) || (value.current !== null && !record(value.current)) || !Object.entries(groups).every(([k, [limit, check]]) => Array.isArray(value[k]) && value[k].length <= limit && value[k].every(v => record(v) && check(v))))

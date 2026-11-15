@@ -1,5 +1,50 @@
 # Visual diagnostics 0.3
 
+## Corrections de fidélité et suspensions — développement après 0.4.0
+
+| Vue / donnée | Source vérifiée | Convention |
+| --- | --- | --- |
+| Sécurité | VTherm `safety_manager.safety_state` | `on` / `off` → vrai / faux ; état inconnu conservé. `is_safety_configured=false` est explicitement inactif. |
+| Délestage | VTherm `power_manager.overpowering_state` | Même convention, avec `is_power_configured`. Ne pas lire la propriété Python interne `is_overpowering_detected`. |
+| Fenêtre | `window_manager.{window_state,window_auto_state,is_window_bypass}` et indicateurs de configuration | Détection manuelle/automatique ; bypass publié prioritaire. Manque d’information reste inconnu. |
+| Barres de suspension | Projection bornée des points du carnet local, `suspensions_observed_at` | Horodatage de l’observation VTherm distinct de la publication SmartPI. Trois pistes sous la température, même axe temporel ; actif, inactif, inconnu. |
+| Relecture PI | SmartPI `history.control.{kp,ki}`, `history.temperature.integral_error` | Restitution des archives ; repli possible seulement sur le `live` archivé de cette même publication. Null explicite conservé. Aucune confiance actuelle héritée. |
+| Unités | Métadonnées archivées de chaque publication | `unité source` si absent ; refus des axes/agrégats thermiques mélangeant des unités. Les courbes de commande restent disponibles. |
+
+Les pistes du carnet local sont explicitement séparées de la provenance
+Recorder/session des courbes. Aucun historique de suspension n’est reconstruit
+à partir de l’état actuel. Les anciens points sans `suspensions_observed_at`
+restent inconnus pour ces pistes ; aucun rattrapage rétroactif. Les changements
+de suspension créent des frontières sans mesure de température. Les intervalles
+sont interrompus au changement de liaison, au-delà de 10 minutes entre observations
+et après la dernière observation. La table accessible énumère les plages actives ;
+une plage ne constitue pas une attribution causale d’une variation thermique.
+
+Sources : SmartPI SHA `43cd4f05f03da65fb4d1d4a4adecbd9d100d5bec`
+(`smartpi/diagnostic_history.py`) ; VTherm SHA
+`e0b0a2f88b543ec2d68f344542407df2a90a5c46`
+(`feature_window_manager.py`, `feature_safety_manager.py`, `feature_power_manager.py`).
+Les bornes, droits admin et actions fermées de l’observatoire restent conservés.
+`get` sans entité ne retourne que l’inventaire borné des carnets orphelins ;
+les seules actions sans source sur un carnet existant sont lecture et effacement.
+La suppression exige une confirmation explicite dans l’interface.
+
+
+## Explications SmartPI ajoutées après l’audit
+
+| Affichage | Champs source | Refus et limites |
+| --- | --- | --- |
+| Pourquoi ce maintien ? | `temperature.integral_{hold_source,hold_mode,guard_source}`, `feedforward.fftrim.{observation_mode,last_reject_reason,last_update_reason,transfer}` | Motifs exacts, codes inconnus conservés, aucune cause dérivée du seul écart de température. |
+| Dernière transaction FF2 | `feedforward.fftrim.last_transaction` : date, motif, qualité, montants demandés/mémorisés/transférables/appliqués, delta net | Ratios ×100 en points de commande, jamais watts. Date propre, pas celle du capteur ; aucune conclusion de saut nul si delta absent. |
+| Gains et mémoire du PI | `history.control.{kp,ki}`, `history.temperature.integral_error` | Trois échelles séparées ; archives seules, pas de contribution I reconstruite. Courbes créées uniquement quand le volet est ouvert. |
+| Attentes d’apprentissage | `learning.last_reason`, `analysis.learning.{ff_warmup_ok_count,ff_warmup_cycles,response_lag}` | Compteurs, seuil et motifs publiés, aucun délai de fin extrapolé. τ affiché seulement si `model.tau_reliable=true`. |
+
+Les publications indisponibles ne réexposent pas d’anciens motifs. Fraîcheur et
+dates futures non vérifiables sont signalées ; les valeurs nulles et les
+résultats numériques non finis sont indisponibles. Les codes connus sont
+confrontés aux modules SmartPI du SHA cité ci-dessus ; les codes futurs restent
+neutres et visibles. Aucun appel réseau ni service ajouté par ces explications.
+
 ## Trois vues historiques descriptives (0.3.2)
 
 Ces vues utilisent exclusivement la fenêtre et la source Recorder ou session

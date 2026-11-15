@@ -49,6 +49,9 @@ export class ObservatoryElement extends LitElement {
     this.saving = false; this.loading = false; this.message = ""; this.eraseArmed = false;
     super.disconnectedCallback();
   }
+  private publishPoints(error = "") {
+    this.dispatchEvent(new CustomEvent("observatory-points",{detail:{entityId:this.entity,points:error?[]:this.room?.points??[],error},bubbles:true,composed:true}));
+  }
   async refresh() {
     if (!this.hass || !this.entity || this.saving) return;
     const generation = ++this.generation, id = this.entity;
@@ -56,9 +59,9 @@ export class ObservatoryElement extends LitElement {
     try {
       const data = await new ObservatoryClient(this.hass).request(id, "get");
       if (generation !== this.generation || !this.isConnected) return;
-      this.room = ObservatoryClient.room(data); this.error = "";
+      this.room = ObservatoryClient.room(data); this.error = "";this.publishPoints();
     } catch (error) {
-      if (generation === this.generation) this.error = error instanceof Error ? error.message : "Lecture de l’observatoire refusée. Vérifiez les droits administrateur et le composant.";
+      if (generation === this.generation) {this.error = error instanceof Error ? error.message : "Lecture de l’observatoire refusée. Vérifiez les droits administrateur et le composant.";this.publishPoints(this.error);}
     } finally {if (generation === this.generation) this.loading = false;}
   }
   private async mutate(action: ObservatoryAction, payload: Rec = {}) {
@@ -71,7 +74,7 @@ export class ObservatoryElement extends LitElement {
       if (action === "clear") result = await client.request(id, "get");
       if (generation !== this.generation || !this.isConnected) return;
       this.room = ObservatoryClient.room(result); this.message = action === "clear" ? "Les données de cette pièce ont été effacées." : "Enregistré localement dans Home Assistant.";
-      this.eraseArmed = false;
+      this.publishPoints();this.eraseArmed = false;
     } catch (error) {
       if (generation === this.generation) {this.error = error instanceof Error ? error.message : "Enregistrement refusé ou impossible."; this.message = "";}
     } finally {if (generation === this.generation) this.saving = false;}

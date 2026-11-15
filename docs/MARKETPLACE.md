@@ -1,4 +1,4 @@
-Version courante préparée : **0.4.0**. [Notes de version](releases/0.4.0.md).
+Version courante préparée : **0.5.0**. [Notes de version](releases/0.5.0.md).
 Le protocole de distribution de la première release ci-dessous reste applicable.
 
 # Diffusion Marketplace

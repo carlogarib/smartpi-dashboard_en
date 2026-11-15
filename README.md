@@ -8,7 +8,7 @@ Panneau de supervision SmartPI pour Home Assistant, avec sélection explicite de
 
 Ces captures utilisent uniquement des données de démonstration synthétiques.
 
-**Version 0.4.0** : modes nommés et colorés,
+**Version 0.5.0** : modes nommés et colorés,
 consignes normale et filtrée, remplissage représentant la commande appliquée.
 Les vues sont descriptives : aucune énergie ni qualité globale du PI n’est déduite du seul pourcentage de commande.
 
@@ -50,7 +50,7 @@ restent indisponibles. [Méthodes, unités et exclusions](docs/MEASUREMENT_METHO
 
 ## État du développement
 
-**Version 0.4.0** — panneau natif avec graphiques température/consigne, commandes,
+**Version 0.5.0** — panneau natif avec graphiques température/consigne, commandes,
 écart filtré et modèle A/B sur 1–48 h. Zoom, déplacement, curseurs synchronisés,
 légende interactive, tables accessibles, schéma logique cliquable et chaîne U.
 Le trajet thermique réunit température mesurée, consigne brute du thermostat et presets publiés.
@@ -146,8 +146,8 @@ au code SmartPI, l'architecture et les limites scientifiques.
 
 [![Configurer SmartPI Dashboard](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=smartpi_dashboard)
 
-Les sources 0.3.3 sont publiées sur `main`, sans tag ni release GitHub créée par
-ce push. Le lien Marketplace permet d’ajouter le dépôt personnalisé ; le projet
+La version 0.5.0 est distribuée dans les [releases GitHub](https://github.com/gael1980/smartpi-dashboard/releases).
+Le lien Marketplace permet d’ajouter le dépôt personnalisé ; le projet
 n’est pas encore dans le catalogue par défaut. Consulter les contrôles GitHub
 Actions avant installation et le [bilan de diffusion](docs/MARKETPLACE.md).
 

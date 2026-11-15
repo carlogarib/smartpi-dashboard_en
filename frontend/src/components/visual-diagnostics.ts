@@ -8,9 +8,13 @@ import {
   type SmartPIDiagnostic,
 } from "../adapter";
 import { readHistory, type HistoryConnection } from "../services/history";
-import { usable, learningMarks, observedEvents, observedTracking, timestamp, valueAt, type LearningMark, type Sample } from "../utils/timeseries";
+import { usable, learningMarks, observedEvents, observedTracking, timestamp, valueAt, archivedUnit, compatibleSampleUnits, type LearningMark, type Sample } from "../utils/timeseries";
 import { ControlPresentation } from "../utils/control";
 import "./time-chart";
+import "./suspension-ribbon";
+import type {SuspensionRibbon} from "./suspension-ribbon";
+import type {ObservationPoint} from "../utils/evidence";
+import {archivedDiagnostic} from "../utils/archived-diagnostic";
 import "./control-diagram";
 import "./command-chain";
 import "./diagnostic-projection";
@@ -73,6 +77,8 @@ export class VisualDiagnostics extends LitElement {
   @property({ attribute: false }) hass?: HassLike & Partial<HistoryConnection>;
   @property({ attribute: false }) diagnostic?: SmartPIDiagnostic;
   @property({ attribute: false }) session: Sample[] = [];
+  @property({attribute:false}) observations: ObservationPoint[] = [];
+  @property() observationError = "";
   @state() private tab = "evolution";
   @state() private hiddenLearning: LearningMark["kind"][] = [];
   @state() private expert = false;
@@ -87,6 +93,7 @@ export class VisualDiagnostics extends LitElement {
   @state() private inspection?: { entityId: string; recorder: boolean; time: number };
   @state() private replay = false;
   @state() private livePublicationMissing = false;
+  @state() private piMemoryOpen = false;
   @state() private block?: "pi" | "ff" | "model";
 
   private async inspectBlock(block: "pi" | "ff" | "model") {
@@ -261,7 +268,7 @@ export class VisualDiagnostics extends LitElement {
       if (generation === this.generation) this.loading = false;
     }
   }
-  private trackingPanel(tracking: ReturnType<typeof observedTracking>, total: number) {
+  private trackingPanel(tracking: ReturnType<typeof observedTracking>, total: number, unit: string) {
     const { pairs, signedMedian, absoluteMedian, largestInterval } = tracking;
     return html`<section class="pane tracking" aria-labelledby="tracking-heading">
       <div class="tracking-title">
@@ -270,10 +277,11 @@ export class VisualDiagnostics extends LitElement {
       </div>
       <dl class="metrics">
         <div><dt>Couples valides</dt><dd>${pairs} / ${total}</dd></div>
-        <div><dt>Médiane signée</dt><dd>${signedMedian === null ? "Indisponible" : `${signedDegrees.format(signedMedian)} °C`}</dd></div>
-        <div><dt>Médiane absolue</dt><dd>${display(absoluteMedian, " °C")}</dd></div>
+        <div><dt>Médiane signée</dt><dd>${signedMedian === null ? "Indisponible" : `${signedDegrees.format(signedMedian)} ${unit}`}</dd></div>
+        <div><dt>Médiane absolue</dt><dd>${display(absoluteMedian, " " + unit)}</dd></div>
         <div><dt>Plus long intervalle entre couples</dt><dd>${display(largestInterval === null ? null : largestInterval / 60, " min", 1)}</dd></div>
       </dl>
+      ${pairs >= 2 && signedMedian === null ? html`<p>Résumé indisponible : les couples traversent des unités ou des contextes enregistrés différents. Réduisez la période.</p>` : nothing}
       <p>${pairs < 2
         ? "Deux couples valides dans la fenêtre sont nécessaires pour résumer l’écart."
         : "Un écart positif indique une température sous la consigne filtrée. La médiane absolue indique la taille typique de l’écart observé."}</p>
@@ -322,11 +330,8 @@ export class VisualDiagnostics extends LitElement {
     const twinPath = "analysis.twin.twin_T_steady";
     const twin = at(snapshot.live, twinPath) == null
       ? format(undefined)
-      : display(reliableValue(snapshot.live, twinPath, "analysis.twin.twin_T_steady_reliable"), " °C");
-    const historyDiagnostic = sample ? {...snapshot,live:{...sample.live,
-      temperature:{...(sample.live.temperature as object ?? {}),indoor:valueAt(sample,"temperature.indoor")},
-      setpoint:{...(sample.live.setpoint as object ?? {}),filtered_setpoint:valueAt(sample,"setpoint.filtered_setpoint")},
-      power:{...(sample.live.power as object ?? {}),applied_percent:valueAt(sample,"power.applied_percent"),command_percent:valueAt(sample,"power.command_percent"),pi_percent:valueAt(sample,"power.pi_percent"),ff_percent:valueAt(sample,"power.ff_percent")},model:{...(sample.live.model as object ?? {}),a:valueAt(sample,"model.a"),b:valueAt(sample,"model.b")}}} : null;
+      : format(reliableValue(snapshot.live, twinPath, "analysis.twin.twin_T_steady_reliable"), " °C");
+    const historyDiagnostic = sample ? archivedDiagnostic(d,sample) : null;
     return html`${sample ? html`<section class="replay-bar">
       <strong>Historique · ${source} · ${time?.toLocaleString()}</strong>
       <label>Parcourir les publications <input aria-label="Publication historique" type="range" min="0" max=${Math.max(0,this.windowData(fromRecorder?this.recorder:this.session).samples.length-1)}
@@ -401,21 +406,22 @@ export class VisualDiagnostics extends LitElement {
     const selected = supervision && point?.entityId === d.entityId && point.recorder === fromRecorder
       ? samples.find((sample) => sample.time === point.time)
       : undefined;
-    const archivedUnits = [...new Set(samples.map(s=>s.unit))];
-    const chartUnit = archivedUnits.length===1 && ["°C","°F"].includes(archivedUnits[0] ?? "") ? archivedUnits[0]! : "unité source";
-    const chart = (heading: string, curves: Curve[], percent = false) =>
+    const chartUnit = archivedUnit(samples);
+    const chart = (heading: string, curves: Curve[], percent = false, unitSensitive = curves.some(c=>c.unit.includes("°C"))) =>
       html`<section class=${percent ? "chart command-chart" : "chart"}>
+        ${unitSensitive && !compatibleSampleUnits(samples) ? html`<p role="status">Unités archivées différentes dans cette fenêtre. Réduisez la période pour comparer des valeurs de même unité.</p>` : nothing}
         <smartpi-time-chart
           .heading=${heading}
           .marks=${learning && curves === learningTemp ? marks : []}
           .thermalPhases=${learning && curves === learningTemp}
-          .samples=${samples}
+          .samples=${!unitSensitive || compatibleSampleUnits(samples) ? samples : []}
           .curves=${curves.map(c=>({...c,unit:c.unit.replace("°C",chartUnit)}))}
           .range=${this.range}
           .percent=${percent}
           .syncKey=${d.entityId}
           .inspectable=${supervision}
           .selectedTime=${selected?.time ?? null}
+          @plot-layout=${(e: CustomEvent<{left:number;right:number}>) => {const ribbon=(e.currentTarget as HTMLElement).querySelector<SuspensionRibbon>("smartpi-suspension-ribbon");if(ribbon)ribbon.inset=e.detail;}}
           @inspect-publication=${(e: CustomEvent<number>) => this.inspect(e.detail)}
           @time-range=${(e: CustomEvent<[number, number]>) => {
             if (e.detail[1] > e.detail[0]) {
@@ -423,7 +429,7 @@ export class VisualDiagnostics extends LitElement {
               this.range = e.detail;
             }
           }}
-        ></smartpi-time-chart>
+        >${curves === temp || curves === learningTemp ? html`<smartpi-suspension-ribbon slot="context-bars" .points=${this.observations} .range=${this.range} .error=${this.observationError}></smartpi-suspension-ribbon>` : nothing}</smartpi-time-chart>
       </section>`;
     return html`<div class="workspace">
       <div class="top">
@@ -579,7 +585,16 @@ export class VisualDiagnostics extends LitElement {
               publications irrégulières ; une ligne ne constitue pas une mesure
               intermédiaire.
             </p>
-            ${this.trackingPanel(tracking, samples.length)}
+            ${this.trackingPanel(tracking, samples.length, archivedUnit(samples))}
+            <details class="pane pi-memory" ?open=${this.piMemoryOpen}
+              @toggle=${(event: Event) => {this.piMemoryOpen = (event.currentTarget as HTMLDetailsElement).open;}}><summary>Gains et mémoire du PI</summary>
+              <p class="foot">Valeurs internes natives publiées par SmartPI, sur trois échelles séparées et sans conversion d’unité.
+                L’état de l’intégrale décrit sa mémoire interne, pas sa contribution à la commande ni un pourcentage de chauffe.
+                Seuls les champs archivés dans la source et la fenêtre sélectionnées sont tracés ; une valeur absente reste un trou.</p>
+              ${this.piMemoryOpen ? html`${chart("Gain proportionnel Kp", [{label:"Kp publié",path:"control.kp",color:"#2689ca",unit:"",step:true}], false, true)}
+              ${chart("Gain intégral Ki", [{label:"Ki publié",path:"control.ki",color:"#9d78bd",unit:"",step:true}], false, true)}
+              ${chart("État de l’intégrale", [{label:"Mémoire intégrale publiée",path:"temperature.integral_error",color:"#bc7254",unit:""}], false, true)}` : nothing}
+            </details>
             <section class="chart"><smartpi-diagnostic-projection .samples=${samples} kind="scatter"
               .source=${fromRecorder ? "Recorder" : "Session"} .contextId=${`${d.entityId}/${fromRecorder}/${this.range.join('/')}`}
               .inspectable=${true} @inspect-publication=${(e: CustomEvent<number>) => this.inspect(e.detail)}></smartpi-diagnostic-projection></section>

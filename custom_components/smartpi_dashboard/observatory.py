@@ -49,6 +49,32 @@ class Observatory:
             root = root.get(key) if isinstance(root, dict) else None
         return root
 
+    @classmethod
+    def suspension(cls, attrs, configured, path):
+        """Decode published VTherm states, never its internal Python properties."""
+        if attrs.get(configured) is False:
+            return False
+        value = cls.at(attrs, path)
+        return value == "on" if value in ("on", "off") else None
+
+    @classmethod
+    def window_suspension(cls, attrs):
+        """Manual/automatic detection share one effective, bypassable feature."""
+        if cls.at(attrs, "window_manager.is_window_bypass") is True:
+            return "off"
+        configured, automatic = attrs.get("is_window_configured"), attrs.get("is_window_auto_configured")
+        if configured is False and automatic is False:
+            return "off"
+        manual = cls.at(attrs, "window_manager.window_state")
+        auto = cls.at(attrs, "window_manager.window_auto_state")
+        if "on" in (manual, auto):
+            return "on"
+        if automatic is True:
+            return "off" if auto == "off" else None
+        if automatic is False:
+            return "off" if manual == "off" else None
+        return "off" if manual == "off" and auto == "off" else None
+
     def snapshot(self, entity_id):
         sensor = self.hass.states.get(entity_id)
         if sensor is None or not entity_id.startswith("sensor.") or sensor.attributes.get("schema_version") != 2:
@@ -68,9 +94,9 @@ class Observatory:
                 "filtered": n(self.at(live, "setpoint.filtered_setpoint")), "preset": attrs.get("preset_mode"), "mode": climate.state if climate else None, "unit": unit if unit in ("°C", "°F") else None,
                 "applied": n(self.at(live, "power.applied_percent")),
                 "bound": climate is not None and sensor.last_updated >= climate.last_updated,
-                "window": self.at(attrs, "window_manager.window_state") if self.at(attrs, "window_manager.window_state") in ("on", "off") else None,
-                "safety": self.at(attrs, "safety_manager.is_safety_detected") if type(self.at(attrs, "safety_manager.is_safety_detected")) is bool else None,
-                "overpowering": self.at(attrs, "power_manager.is_overpowering_detected") if type(self.at(attrs, "power_manager.is_overpowering_detected")) is bool else None,
+                "window": self.window_suspension(attrs),
+                "safety": self.suspension(attrs, "is_safety_configured", "safety_manager.safety_state"),
+                "overpowering": self.suspension(attrs, "is_power_configured", "power_manager.overpowering_state"),
                 "twin": {"status": twin("twin_status"), "model_reliable": twin("twin_model_reliable"), "warming_up": twin("twin_warming_up"), "tau_reliable": self.at(live, "model.tau_reliable"), "eta_s": n(twin("eta_s")), "reason": twin("eta_reason")}}
 
     async def start(self):
@@ -117,7 +143,7 @@ class Observatory:
             if point is None:
                 old = self.book.data["rooms"].get(target, {}).get("current")
                 if old:
-                    point = {**old, "available": False, "target": None, "climate_id": None, "observed_at": self.now()}
+                    point = {**old, "available": False, "target": None, "climate_id": None, "window": None, "safety": None, "overpowering": None, "observed_at": self.now()}
                 else:
                     continue
             if target not in self.book.data["rooms"] and len(self.book.data["rooms"]) >= ObservationBook.MAX_ROOMS:
@@ -170,24 +196,42 @@ class Observatory:
             raise OSError("Local save was not confirmed")
 
     async def request(self, entity_id, action, payload):
-        ObservationBook.validate_request(entity_id, action, payload)
+        ObservationBook.validate_request(entity_id, action, payload, inventory=True)
         self.admit(action)
         async with self._requests:
             if self._stopped or self.hass.state is CoreState.stopping:
                 raise ValueError("L’observatoire est en cours d’arrêt. Rechargez le panneau après redémarrage.")
+            if entity_id is None:
+                self.book.expire(self.now())
+                return {"orphans": self.orphans()}
             point = self.snapshot(entity_id)
             if point is None:
-                raise ValueError("Diagnostic SmartPI v2 introuvable.")
-            self.book.observe(entity_id, point, published=False)
+                if entity_id not in self.book.data["rooms"] or action not in ("get", "clear"):
+                    raise ValueError("Diagnostic SmartPI v2 introuvable.")
+            elif entity_id not in self.book.data["rooms"] and len(self.book.data["rooms"]) >= ObservationBook.MAX_ROOMS and action == "get":
+                # Reading the inventory must remain possible when stale rooms fill the quota.
+                self.book.expire(self.now())
+                return {**ObservationBook().export(entity_id), "orphans": self.orphans()}
+            else:
+                self.book.observe(entity_id, point, published=False)
             result = self.book.action(entity_id, action, payload, self.now())
+            if action == "get":
+                if point is None:
+                    result["current"] = None
+                result["orphans"] = self.orphans()
             if action != "get":
                 await self.save_confirmed()
             return deepcopy(result)
 
+    def orphans(self):
+        """Bounded inventory only; note contents remain behind the room projection."""
+        return [{"entity_id": entity_id, **{kind: len(room[kind]) for kind in ("bookmarks", "trials", "forecasts", "receipts", "points")}}
+                for entity_id, room in self.book.data["rooms"].items() if self.snapshot(entity_id) is None]
+
 
 @websocket_api.websocket_command({
     probatio.Required("type"): "smartpi_dashboard/observatory",
-    probatio.Required("entity_id"): str,
+    probatio.Optional("entity_id"): str,
     probatio.Required("action"): probatio.In(("get", "clear", "bookmark_save", "bookmark_delete", "trial_start", "trial_stop", "trial_feedback", "trial_delete", "forecast_delete", "receipt_delete", "receipt_begin", "receipt_finish")),
     probatio.Optional("payload", default={}): dict,
 })
@@ -199,7 +243,7 @@ async def handle_observatory(hass, connection, msg):
         connection.send_error(msg["id"], "not_loaded", "L’observatoire n’est pas chargé.")
         return
     try:
-        result = await observer.request(msg["entity_id"], msg["action"], msg["payload"])
+        result = await observer.request(msg.get("entity_id"), msg["action"], msg["payload"])
     except ValueError as error:
         connection.send_error(msg["id"], "invalid_request", str(error))
     except OSError:

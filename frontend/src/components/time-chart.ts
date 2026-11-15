@@ -2,7 +2,7 @@ import { LitElement, html, css, unsafeCSS } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import uPlot from "uplot";
 import plotCSS from "uplot/dist/uPlot.min.css";
-import { valueAt, type LearningMark, type Sample } from "../utils/timeseries";
+import { sameSampleContext, valueAt, type LearningMark, type Sample } from "../utils/timeseries";
 import {commandPair, DiagnosticProjection} from "../utils/diagnostic-projection";
 export interface Curve {
   label: string;
@@ -30,6 +30,7 @@ export class TimeChart extends LitElement {
   private lastSignature = "";
   private plot?: uPlot;
   private observer?: ResizeObserver;
+  private layoutFrame?: number;
   private applying = false;
   private themeMedia = matchMedia("(prefers-color-scheme: dark)");
   private themeChange = () => this.draw();
@@ -46,6 +47,8 @@ export class TimeChart extends LitElement {
     super.disconnectedCallback();
   }
   private dispose() {
+    cancelAnimationFrame(this.layoutFrame ?? 0);
+    this.layoutFrame = undefined;
     this.observer?.disconnect();
     this.observer = undefined;
     this.plot?.destroy();
@@ -93,6 +96,11 @@ export class TimeChart extends LitElement {
     if (index >= 0 && this.hiddenCurves.has(this.curves[index].label))
       this.toggleSeries(index);
   }
+  private continuous(previous: Sample, current: Sample) {
+    const elapsed = current.time - previous.time;
+    return elapsed > 0 && elapsed <= DiagnosticProjection.GAP_SECONDS &&
+      sameSampleContext(previous, current);
+  }
   private drawThermalPhases(u: uPlot) {
     if (!this.thermalPhases) return;
     const { left, top, width, height } = u.bbox;
@@ -118,7 +126,8 @@ export class TimeChart extends LitElement {
       const previous = this.samples[i - 1], current = this.samples[i];
       const before = valueAt(previous, "temperature.indoor");
       const after = valueAt(current, "temperature.indoor");
-      const next = before === null || after === null ? 0 : Math.sign(after - before);
+      const next = before === null || after === null || !this.continuous(previous, current)
+        ? 0 : Math.sign(after - before);
       if (next !== direction) {
         flush();
         start = previous.time;
@@ -169,6 +178,18 @@ export class TimeChart extends LitElement {
       ctx.fillText(mark.kind === "Chauffe" ? "↑" : mark.kind === "Refroidissement" ? "↓" : mark.kind, x, y);
     }
     ctx.restore();
+  }
+  private publishLayout(target: HTMLElement) {
+    cancelAnimationFrame(this.layoutFrame ?? 0);
+    this.layoutFrame = requestAnimationFrame(() => {
+      this.layoutFrame = undefined;
+      if (!this.plot || !this.isConnected) return;
+      const container = target.getBoundingClientRect(), area = this.plot.over.getBoundingClientRect();
+      this.dispatchEvent(new CustomEvent("plot-layout", {
+        detail: {left: area.left - container.left, right: container.right - area.right},
+        bubbles: true, composed: true,
+      }));
+    });
   }
   private draw() {
     if (!this.isConnected) return;
@@ -261,10 +282,9 @@ export class TimeChart extends LitElement {
             dash: c.dash,
             spanGaps: false,
             gaps: (u: uPlot, _series: number, start: number, end: number, gaps: uPlot.Series.Gaps) => {
-              if (!this.commandComparison) return gaps;
               const extra: uPlot.Series.Gaps = [...gaps];
               for (let i = start + 1; i <= end; i++) {
-                if (this.samples[i].time - this.samples[i - 1].time > DiagnosticProjection.GAP_SECONDS) {
+                if (!this.continuous(this.samples[i - 1], this.samples[i])) {
                   extra.push([Math.round(u.valToPos(this.samples[i - 1].time, "x", true)), Math.round(u.valToPos(this.samples[i].time, "x", true))]);
                 }
               }
@@ -352,6 +372,7 @@ export class TimeChart extends LitElement {
       target,
     );
     this.applying = false;
+    this.publishLayout(target);
     this.observer = new ResizeObserver(() => {
       if (this.plot && this.plot.width !== Math.max(240, target.clientWidth)) {
         this.applying = true;
@@ -360,6 +381,7 @@ export class TimeChart extends LitElement {
           height: 245,
         });
         this.applying = false;
+        this.publishLayout(target);
       }
     });
     this.observer.observe(target);
@@ -402,6 +424,7 @@ export class TimeChart extends LitElement {
           const time = plot.data[0][plot.posToIdx(event.clientX - plot.over.getBoundingClientRect().left)];
           if (time !== undefined) this.inspect(time);
         } }}></div>
+      <slot name="context-bars"></slot>
       ${publication ? html`<div class="publication-values" aria-label="Valeurs de la publication">
         <div class="publication-date">${showLatest ? "Dernière publication de la fenêtre" : "Publication sélectionnée"}
           · <time datetime=${new Date(publication.time * 1000).toISOString()}>${new Date(publication.time * 1000).toLocaleString()}</time>

@@ -4,6 +4,12 @@ The dashboard bundles the following libraries. Original regulator and legacy das
 
 ## uplot
 
+The bundled uPlot 1.6.32 ESM source receives a local build-time hardening patch
+in `frontend/scripts/uplot-hardening.mjs`. The upstream SHA256 is checked before
+patching. Object copying and option merging ignore inherited and prototype-related
+keys; merging never mutates inherited destination objects. The installed package
+is not modified. The following MIT license applies to uPlot and these changes.
+
 The MIT License (MIT)
 
 Copyright (c) 2022 Leon Sorokin

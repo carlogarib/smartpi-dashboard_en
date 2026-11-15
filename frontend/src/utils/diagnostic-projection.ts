@@ -1,4 +1,4 @@
-import {normalize, valueAt, type Sample} from "./timeseries";
+import {archivedUnit, compatibleSampleUnits, sameSampleContext, normalize, valueAt, type Sample} from "./timeseries";
 
 export type ProjectionKind = "scatter" | "model";
 export interface ProjectionPoint {
@@ -27,13 +27,24 @@ export class DiagnosticProjection {
   readonly points: ProjectionPoint[];
   readonly reduced: boolean;
   readonly distinct: number;
+  readonly unit: ReturnType<typeof archivedUnit>;
+  readonly compatibleUnits: boolean;
 
   constructor(samples: Sample[], readonly kind: ProjectionKind) {
     const ordered = normalize(samples);
     this.total = ordered.length;
+    this.unit = archivedUnit(ordered);
+    this.compatibleUnits = compatibleSampleUnits(ordered);
+    if (!this.compatibleUnits) {
+      this.valid = 0; this.points = []; this.reduced = false; this.distinct = 0;
+      return;
+    }
     const points: ProjectionPoint[] = [];
     let valid = 0, segment = 0, previousTime: number | null = null;
+    let previousSample: Sample | undefined;
     for (const sample of ordered) {
+      if (previousSample && !sameSampleContext(previousSample, sample)) ++segment;
+      previousSample = sample;
       if (previousTime !== null && sample.time - previousTime > DiagnosticProjection.GAP_SECONDS) ++segment;
       previousTime = sample.time;
       const x = valueAt(sample, kind === "scatter" ? "error" : "model.a");

@@ -52,6 +52,36 @@ class ObservationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             ObservationBook(self.book.data)
 
+    def test_suspension_changes_record_observation_time_without_a_new_temperature(self):
+        self.book.observe("sensor.demo", point(1001, bound=True, window="off", safety=False, overpowering=False), True)
+        self.book.observe("sensor.demo", point(1001, observed_at=1002, bound=False, window="on", safety=False, overpowering=False), False)
+        boundary = self.room["points"][-1]
+        self.assertEqual((boundary["time"], boundary["suspensions_observed_at"]), (1002, 1002))
+        self.assertEqual((boundary["window"], boundary["safety"], boundary["overpowering"]), ("on", False, False))
+        self.assertEqual((boundary["climate_id"], boundary["mode"], boundary["unit"]), ("climate.demo", "heat", "°C"))
+        self.assertIsNone(boundary["temperature"])
+        exported = self.book.export("sensor.demo")["points"]
+        self.assertEqual(exported[0]["suspensions_observed_at"], 1001)
+        self.assertEqual(exported[-1]["suspensions_observed_at"], 1002)
+        ObservationBook(self.book.data, 1003)
+        self.room["points"][-1]["suspensions_observed_at"] = "invalid"
+        with self.assertRaises(ValueError):
+            ObservationBook(self.book.data, 1003)
+
+    def test_legacy_points_do_not_receive_current_suspension_timestamps(self):
+        self.room["points"].append({"time": 1000, "temperature": 19, "target": 20})
+        restored = ObservationBook(self.book.data, 1001)
+        self.assertNotIn("suspensions_observed_at", restored.room("sensor.demo")["points"][0])
+        self.assertIsNone(restored.export("sensor.demo")["points"][0].get("suspensions_observed_at"))
+
+    def test_global_inventory_validation_cannot_create_anonymous_saved_rooms(self):
+        with self.assertRaises(ValueError):
+            self.book.action(None, "get", {}, 1000)
+        self.assertNotIn(None, self.book.data["rooms"])
+        invalid = {"version": 1, "rooms": {None: self.room}}
+        with self.assertRaises(ValueError):
+            ObservationBook(invalid)
+
     def test_startup_is_not_a_historical_forecast(self):
         self.assertEqual(self.room["forecasts"], [])
         self.assertEqual(self.room["points"], [])

@@ -17,6 +17,9 @@ export const HISTORY_PATHS = [
   "power.ff_percent",
   "model.a",
   "model.b",
+  "control.kp",
+  "control.ki",
+  "temperature.integral_error",
 ] as const;
 export interface Sample {
   time: number;
@@ -77,6 +80,21 @@ export function normalize(samples: Sample[]): Sample[] {
     (a, b) => a.time - b.time,
   );
 }
+function sampleUnit(sample: Pick<Sample, "unit">): "°C" | "°F" | null {
+  return sample.unit === "°C" || sample.unit === "°F" ? sample.unit : null;
+}
+/** Only recorded metadata can label archived values; unknown stays unknown. */
+export function archivedUnit(samples: readonly Pick<Sample, "unit">[]): "°C" | "°F" | "unité source" {
+  const units = new Set(samples.map(sampleUnit));
+  return units.size === 1 ? sampleUnit(samples[0]) ?? "unité source" : "unité source";
+}
+export function compatibleSampleUnits(samples: readonly Pick<Sample, "unit">[]): boolean {
+  return new Set(samples.map(sampleUnit)).size <= 1;
+}
+/** Missing historical context may match missing context, never an explicit one. */
+export function sameSampleContext(a: Sample, b: Sample): boolean {
+  return sampleUnit(a) === sampleUnit(b) && (a.context ?? null) === (b.context ?? null);
+}
 export function valueAt(s: Sample, path: string): number | null {
   if (path === "error") {
     const temp = num(at(s.history, "temperature.indoor")),
@@ -99,11 +117,14 @@ function median(values: number[]): number | null {
 /** Describes complete publications in chronological order, with equal point weights. */
 export function observedTracking(samples: readonly Sample[]) {
   const errors: number[] = [];
+  let first: Sample | undefined, compatible = true;
   let previous: number | null = null;
   let largestInterval: number | null = null;
   for (const sample of samples) {
     const error = valueAt(sample, "error");
     if (error === null) continue;
+    if (first && !sameSampleContext(first, sample)) compatible = false;
+    first ??= sample;
     errors.push(error);
     if (previous !== null) {
       largestInterval = Math.max(largestInterval ?? 0, sample.time - previous);
@@ -113,9 +134,9 @@ export function observedTracking(samples: readonly Sample[]) {
   const absolute = errors.map(Math.abs);
   return {
     pairs: errors.length,
-    signedMedian: median(errors),
-    absoluteMedian: median(absolute),
-    largestInterval,
+    signedMedian: compatible ? median(errors) : null,
+    absoluteMedian: compatible ? median(absolute) : null,
+    largestInterval: compatible ? largestInterval : null,
   };
 }
 export function usable(samples: Sample[]): boolean {
@@ -128,10 +149,10 @@ export function observedEvents(samples: Sample[]): DiagnosticEvent[] {
       b = samples[i];
     const from = num(at(a.history, "setpoint.filtered_setpoint")),
       to = num(at(b.history, "setpoint.filtered_setpoint"));
-    if (from !== null && to !== null && from !== to)
+    if (sameSampleContext(a, b) && from !== null && to !== null && from !== to)
       events.push({
         time: b.time,
-        label: `Consigne filtrée ${from} → ${to} °C`,
+        label: `Consigne filtrée ${from} → ${to} ${archivedUnit([a,b])}`,
         provenance:
           "Variation observée entre publications ; ce n’est pas nécessairement une modification utilisateur.",
       });
@@ -243,6 +264,7 @@ export function learningMarks(samples: readonly Sample[]): LearningMark[] {
   };
   for (let i = 1; i < samples.length; i++) {
     const [previous, current] = [samples[i - 1], samples[i]];
+    if (!sameSampleContext(previous, current)) continue;
     if ([previous, current].some((s) => ["unknown", "unavailable", "inactive"].includes(s.state))) continue;
     const point = {
       time: current.time,
@@ -253,7 +275,7 @@ export function learningMarks(samples: readonly Sample[]): LearningMark[] {
       const key = kind.toLowerCase();
       const before = count(previous, key), after = count(current, key);
       const value = valueAt(current, `model.${key}`);
-      const unit = kind === "A" ? "°C/min/u" : "min⁻¹";
+      const unit = kind === "A" ? `${archivedUnit([current])}/min/u` : "min⁻¹";
       const published = value === null ? "valeur indisponible" : `${value} ${unit}`;
       if (before !== null && after !== null && after > before)
         marks.push({ ...point, kind, label: `${kind} · +${after - before} accepté(s) entre ${new Date(previous.time * 1000).toLocaleString()} et cette publication · ${published}` });

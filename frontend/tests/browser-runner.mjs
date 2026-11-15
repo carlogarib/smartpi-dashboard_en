@@ -132,6 +132,121 @@ try {
     c.remove();return partial&&inspected&&retained&&empty;
   `);
   assert.ok(checks.legendPartialAndZero);
+  checks.chartContinuity = await run(`
+    const c=document.createElement('smartpi-time-chart');c.thermalPhases=true;
+    c.range=[0,4000];c.curves=[{label:'Température',path:'temperature.indoor',unit:'°C',color:'#2689ca'}];
+    const sample=(time,temperature,unit='°C',context='room-a')=>({time,state:'stable',unit,context,live:{},history:{temperature:{indoor:temperature}}});
+    p.shadowRoot.append(c);
+    const cases=[
+      {samples:[sample(100,18),sample(700,19)],continuous:true},
+      {samples:[sample(100,18),sample(701,19)],continuous:false},
+      {samples:[sample(100,18),sample(200,19,'°F')],continuous:false},
+      {samples:[sample(100,18),sample(200,19,'°C','room-b')],continuous:false},
+      {samples:[sample(100,18),sample(200,null),sample(300,19)],continuous:false},
+    ];
+    let valid=true;
+    for(const scenario of cases){
+      c.samples=scenario.samples;await c.updateComplete;
+      const fills=[],ctx={save(){},beginPath(){},rect(){},clip(){},fillRect(...args){fills.push(args)},restore(){}};
+      c.drawThermalPhases({bbox:{left:0,top:0,width:4000,height:200},ctx,valToPos:time=>time});
+      const gaps=c.plot.series[1].gaps(c.plot,1,0,c.samples.length-1,[]);
+      valid&&=scenario.continuous?fills.length===2&&gaps.length===0:fills.length===0;
+      if(scenario.samples.length===2&&!scenario.continuous)valid&&=gaps.length===1;
+    }
+    c.remove();return valid;
+  `);
+  assert.ok(checks.chartContinuity,'Charts and thermal phases must stop at missing data, long gaps, unit or context changes');
+  checks.chartContextLayout = await run(`
+    const c=document.createElement('smartpi-time-chart');c.style.cssText='display:block;width:600px';
+    c.range=[100,200];c.curves=[{label:'Température',path:'temperature.indoor',unit:'°C',color:'#2689ca'}];
+    c.samples=[{time:100,state:'stable',live:{},history:{temperature:{indoor:18}}},
+      {time:200,state:'stable',live:{},history:{temperature:{indoor:19}}}];
+    const bar=document.createElement('div');bar.slot='context-bars';c.append(bar);
+    const layouts=[];c.addEventListener('plot-layout',e=>layouts.push(e.detail));
+    p.shadowRoot.append(c);await c.updateComplete;
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+    const matches=()=>{const area=c.plot.over.getBoundingClientRect(),box=c.shadowRoot.querySelector('.plot').getBoundingClientRect(),last=layouts.at(-1);
+      return last&&Math.abs(last.left-(area.left-box.left))<.01&&Math.abs(last.right-(box.right-area.right))<.01;};
+    const initial=c.plot,slot=c.shadowRoot.querySelector('slot[name=context-bars]');
+    let valid=matches()&&slot.assignedElements()[0]===bar&&slot.previousElementSibling.classList.contains('plot');
+    c.style.width='400px';await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+    valid&&=layouts.length>=2&&matches()&&c.plot===initial;
+    c.remove();return valid;
+  `);
+  assert.ok(checks.chartContextLayout,'Context bars must align to plot area and follow resizing without rebuilding the chart');
+  checks.suspensionRibbon = await run(`
+    const original=v.observations,end=v.range[1];
+    const point=(offset,extra={})=>({time:end-offset,suspensions_observed_at:end-offset,temperature:19,target:20,outdoor:8,applied:40,mode:'heat',unit:'°C',climate_id:'climate.fixture',window:'off',safety:false,overpowering:false,...extra});
+    v.observations=[point(240,{window:'on',safety:true,overpowering:true}),point(180),point(120,{window:null,safety:null,overpowering:null}),point(60)];
+    await v.updateComplete;
+    const c=root.querySelector('smartpi-time-chart'),bar=c.querySelector('smartpi-suspension-ribbon');await c.updateComplete;await bar.updateComplete;
+    const rows=[...bar.shadowRoot.querySelectorAll('.row')];
+    let valid=rows.length===3&&rows.every(row=>row.querySelector('.active')&&row.querySelector('.inactive')&&row.querySelector('.unknown'))
+      &&bar.textContent===''&&bar.shadowRoot.textContent.includes('Carnet local')&&bar.shadowRoot.textContent.includes('séparés des courbes Recorder ou de session');
+    v.observations=[point(240,{window:'on',safety:true,overpowering:true,suspensions_observed_at:undefined}),point(180,{suspensions_observed_at:undefined})];
+    await v.updateComplete;await bar.updateComplete;
+    valid&&=[...bar.shadowRoot.querySelectorAll('.row')].every(row=>!row.querySelector('.active')&&!row.querySelector('.inactive')&&row.querySelector('.unknown'));
+    v.observations=original;await v.updateComplete;return valid;
+  `);
+  assert.ok(checks.suspensionRibbon,'Suspensions must distinguish observed states from unarchived periods');
+  checks.suspensionAlignment={};
+  for(const width of [1440,390,320]){
+    await send('Emulation.setDeviceMetricsOverride',{width,height:1000,deviceScaleFactor:1,mobile:width<500});await settle();
+    checks.suspensionAlignment[width]=await run(`const c=root.querySelector('smartpi-time-chart'),bar=c.querySelector('smartpi-suspension-ribbon');await bar.updateComplete;
+      const area=c.plot.over.getBoundingClientRect(),track=bar.shadowRoot.querySelector('.track').getBoundingClientRect();
+      bar.scrollIntoView({block:'center'});return Math.abs(area.left-track.left)<1&&Math.abs(area.right-track.right)<1&&document.documentElement.scrollWidth<=innerWidth;`);
+    assert.ok(checks.suspensionAlignment[width],'Suspension alignment '+width);
+    const shot=await send('Page.captureScreenshot',{format:'png'});
+    await writeFile(output+'/suspensions-'+width+'.png',Buffer.from(shot.data,'base64'));
+  }
+  await send('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
+  checks.archivedPiReplay = await run(`
+    const saved={recorder:v.recorder,recorderEntity:v.recorderEntity,preferSession:v.preferSession,range:v.range,inspection:v.inspection,replay:v.replay};
+    const time=v.range[1]-60,sample={time,state:'stable',live:{},history:{temperature:{indoor:19,integral_error:12},control:{kp:.5,ki:0},power:{pi_percent:8}}};
+    v.recorder=[sample];v.recorderEntity=v.diagnostic.entityId;v.preferSession=false;v.range=[time-1,time+1];v.inspection={entityId:v.diagnostic.entityId,recorder:true,time};v.replay=true;
+    await v.updateComplete;const d=root.querySelector('smartpi-control-diagram');await d.updateComplete;
+    d.shadowRoot.querySelector('g.block[aria-label^="Régulateur PI"]').dispatchEvent(new MouseEvent('click',{bubbles:true}));await d.updateComplete;
+    const rows=[...d.shadowRoot.querySelectorAll('aside dl>div')],value=label=>rows.find(row=>row.querySelector('dt')?.textContent===label)?.querySelector('dd')?.textContent.trim();
+    const valid=value('Gain proportionnel Kp')==='0,5'&&value('Gain intégral Ki')==='0'&&value('État de l’intégrale')==='12'&&d.historical&&d.diagnostic.climateId===null;
+    Object.assign(v,saved);await v.updateComplete;return valid;
+  `);
+  assert.ok(checks.archivedPiReplay,'Replay PI gains and integral must come from the archived publication, including zero');
+  checks.piMemoryCharts = await run(`
+    const saved={recorder:v.recorder,recorderEntity:v.recorderEntity,preferSession:v.preferSession,range:v.range,inspection:v.inspection,piMemoryOpen:v.piMemoryOpen},reads=fixture.counts.reads;
+    const time=v.range[1]-120,point=(time,history)=>({time,state:'stable',live:{control:{kp:99,ki:99},temperature:{integral_error:99}},history:{temperature:{indoor:19},...history}});
+    v.recorder=[point(time,{control:{kp:.5,ki:0},temperature:{indoor:19,integral_error:12}}),point(time+60,{control:{kp:.6},temperature:{indoor:19,integral_error:-3}})];
+    v.recorderEntity=v.diagnostic.entityId;v.preferSession=false;v.range=[time-1,time+61];v.inspection=undefined;
+    await v.updateComplete;const details=root.querySelector('details.pi-memory');details.open=true;
+    await new Promise(resolve=>setTimeout(resolve,0));await v.updateComplete;
+    const charts=[...details.querySelectorAll('smartpi-time-chart')];await Promise.all(charts.map(c=>c.updateComplete));
+    const paths=charts.map(c=>c.curves[0].path);
+    let valid=charts.length===3&&paths.join(',')==='control.kp,control.ki,temperature.integral_error'
+      &&charts.every(c=>c.curves.length===1&&c.range[0]===v.range[0]&&c.range[1]===v.range[1])
+      &&charts[1].shadowRoot.textContent.includes('Absente à cet instant')&&!charts.some(c=>c.shadowRoot.querySelector('.publication-values')?.textContent.includes('99'));
+    charts[1].inspect(time);await v.updateComplete;await Promise.all(charts.map(c=>c.updateComplete));
+    valid&&=v.inspection?.time===time&&charts[1].shadowRoot.querySelector('.publication-values').textContent.includes('0 ');
+    v.recorder=[point(time,{temperature:{indoor:19}})];await v.updateComplete;await Promise.all(charts.map(c=>c.updateComplete));
+    valid&&=charts.every(c=>!c.plot&&c.shadowRoot.textContent.includes('Absente à cet instant'))&&fixture.counts.reads===reads;
+    details.open=false;await new Promise(resolve=>setTimeout(resolve,0));await v.updateComplete;
+    valid&&=!details.querySelector('smartpi-time-chart')&&charts.every(c=>!c.plot&&!c.observer);
+    Object.assign(v,saved);await v.updateComplete;return valid;
+  `);
+  assert.ok(checks.piMemoryCharts,'PI memory charts must use archived gains and integral, preserve zero and gaps, share selection and issue no new request');
+  checks.orphanRecovery = await run(`
+    const empty=document.createElement('smartpi-dashboard-panel'),calls=[];let deleted=false,services=0;
+    const id='sensor.removed_fixture',book={current:null,points:[],bookmarks:[{id:'one',label:'Souvenir conservé',created_at:100,temperature:19,target:20,preset:null,outdoor:8,unit:'°C'}],receipts:[],trials:[],forecasts:[]};
+    empty.hass={states:{},callService:async()=>{services++},callWS:async message=>{calls.push(message);if(!message.entity_id)return{orphans:deleted?[]:[{entity_id:id,bookmarks:1,trials:0,forecasts:0,receipts:0,points:0}]};if(message.action==='clear'){deleted=true;return{}}return structuredClone(book);}};
+    p.shadowRoot.append(empty);await empty.updateComplete;
+    const o=empty.shadowRoot.querySelector('smartpi-orphan-notebooks');await o.updateComplete;
+    const tick=async()=>{await new Promise(resolve=>setTimeout(resolve,0));await o.updateComplete;},button=text=>[...o.shadowRoot.querySelectorAll('button')].find(b=>b.textContent.trim()===text);
+    await o.load();await tick();let valid=empty.shadowRoot.textContent.includes('Aucun diagnostic')&&o.shadowRoot.textContent.includes(id);
+    button('Consulter').click();await tick();valid&&=o.shadowRoot.textContent.includes('Souvenir conservé');
+    button('Supprimer ce carnet').click();await tick();valid&&=!deleted&&!!button('Confirmer la suppression');
+    button('Confirmer la suppression').click();await tick();
+    valid&&=deleted&&o.shadowRoot.textContent.includes('Aucun carnet orphelin')&&services===0&&calls.filter(c=>c.action==='clear').length===1;
+    empty.remove();return valid;
+  `);
+  assert.ok(checks.orphanRecovery,'An orphan notebook must remain readable and explicitly deletable without an active diagnostic or climate call');
   const touchPoint = await run(`
     const c=document.createElement('smartpi-time-chart');c.inspectable=true;c.syncKey='touch-test';
     c.range=[90,300];c.curves=[{label:'Commande',path:'power.applied_percent',unit:'%',color:'#2689ca'}];
@@ -592,6 +707,83 @@ try {
   checks.journeyInitial = await journey(`return {calls:f.calls.length,eta:r.querySelector('.eta')?.textContent.includes('35 min'),target:r.querySelector('.destination').textContent.includes('20'),measured:r.querySelector('.measured').textContent.includes('19,2')};`);
   assert.equal(checks.journeyInitial.calls, 0);
   assert.ok(checks.journeyInitial.eta && checks.journeyInitial.target && checks.journeyInitial.measured);
+  checks.journeyRoomNavigation = await journey(`
+    const sensor=structuredClone(f.sensor),climate=structuredClone(f.climate);
+    sensor.entity_id='sensor.navigation_test';climate.entity_id='climate.navigation_test';
+    climate.attributes.specific_states.regulation_diagnostics=sensor.entity_id;
+    f.hass.states[sensor.entity_id]=sensor;f.hass.states[climate.entity_id]=climate;${sync}
+    const select=async id=>{p.selectedId=id;await p.updateComplete;await j.updateComplete;
+      return !!r.querySelector('.eta')&&!r.textContent.includes('après le changement de consigne');};
+    const valid=await select(sensor.entity_id)&&await select(f.sensor.entity_id);
+    delete f.hass.states[sensor.entity_id];delete f.hass.states[climate.entity_id];${sync}
+    return valid&&f.calls.length===0;
+  `);
+  assert.ok(checks.journeyRoomNavigation,'Selecting another room must preserve its already valid Twin publication');
+  checks.journeyReconnectPending = await journey(`
+    const original=f.hass.callWS,base=f.calls.length;let valid=true;
+    for(const stage of ['metadata','service']){
+      let release,entered=false;const gate=new Promise(resolve=>release=resolve);
+      p.hass={...f.hass,callWS:async message=>{if(stage==='metadata'&&message.action==='receipt_begin'){entered=true;await gate;}return original(message);}};
+      f.setPending(stage==='service'?gate:undefined);await p.updateComplete;await j.updateComplete;
+      await j.previewTemperature(21);const operation=j.apply();
+      for(let n=0;n<20&&!(stage==='metadata'?entered:f.calls.length>base);n++)await new Promise(resolve=>setTimeout(resolve,0));
+      const parent=j.parentNode,next=j.nextSibling;j.remove();parent.insertBefore(j,next);await j.updateComplete;
+      release();await operation;await j.updateComplete;
+      valid&&=!j.sending&&!j.choice&&!r.querySelector('.apply')&&r.querySelector('[role=status]').textContent.includes('Résultat non confirmé')
+        &&f.calls.length===base+(stage==='service'?1:0);
+      await new Promise(resolve=>setTimeout(resolve,0));valid&&=f.calls.length===base+(stage==='service'?1:0);
+      f.calls.length=base;
+    }
+    f.setPending(undefined);p.hass=f.hass;await p.updateComplete;await j.updateComplete;
+    return valid;
+  `);
+  assert.ok(checks.journeyReconnectPending,'Reconnecting a pending request must discard its preview, report uncertainty and never resend');
+  checks.publishedExplanations = await journey(`
+    const maintenance=document.createElement('smartpi-explanations'),learning=document.createElement('smartpi-explanations');
+    maintenance.mode='maintenance';learning.mode='learning';
+    const diagnostic={...j.diagnostic,lastUpdated:new Date().toISOString(),available:true,live:{
+      temperature:{integral_hold_source:'deadband_hysteresis_shell',integral_hold_mode:'future_hold',integral_guard_source:'setpoint_change'},
+      feedforward:{fftrim:{observation_mode:'stationary',stationary:{state:'ready'},periodic:{state:'waiting_deadtime'},last_reject_reason:'future_reject',last_update_reason:'updated_bumpless',transfer:{state:'applied',reason:'updated_bumpless'},
+        last_transaction:{timestamp_utc:'2026-11-14T10:00:00Z',observation_mode:'stationary',state:'applied',reason:'updated_bumpless',quality:'future_quality',requested_trim_delta:0,stored_trim_delta:0,transferable_i_power:0,requested_i_transfer:0,applied_i_transfer:0,applied_trim_delta:.03}}},
+      learning:{last_reason:'skip: no external temp'},model:{tau_reliable:false,tau_min:999},
+      analysis:{learning:{ff_warmup_ok_count:0,ff_warmup_cycles:7,response_lag:{lag_s:0,estimates:0,episodes:0,episodes_target:3,last_reason:'warming_up'}}}}};
+    maintenance.diagnostic=diagnostic;learning.diagnostic=diagnostic;p.shadowRoot.append(maintenance,learning);
+    await Promise.all([maintenance.updateComplete,learning.updateComplete]);
+    const m=maintenance.shadowRoot,l=learning.shadowRoot,field=(root,key)=>root.querySelector('[data-field='+key+'] dd')?.textContent;
+    let valid=m.querySelector('summary').textContent==='Pourquoi ce maintien ?'&&l.querySelector('summary').textContent==='Comprendre l’apprentissage'
+      &&field(m,'hold-source').includes('Intégrale conservée')&&field(m,'hold-mode')==='Code publié · future_hold'
+      &&field(m,'trim-reject')==='Code publié · future_reject'&&field(m,'i-transfer')==='0 points de commande'
+      &&['requested-trim','stored-trim','transferable-i','requested-i'].every(key=>field(m,key)==='0 points de commande')
+      &&field(m,'trim-delta')==='3 points de commande'&&field(m,'net-delta')==='Indisponible'
+      &&m.querySelector('[data-transaction] time').dateTime==='2026-11-14T10:00:00Z'
+      &&field(l,'warmup-count')==='0'&&field(l,'response-lag')==='0 s'&&field(l,'lag-episodes')==='0'
+      &&field(l,'tau').includes('Non interprétable')&&!l.textContent.includes('999 min');
+    maintenance.now=Date.parse(diagnostic.lastUpdated)/1000+601;await maintenance.updateComplete;
+    const agingQuality=m.querySelector('smartpi-publication-quality');await agingQuality.updateComplete;
+    valid&&=agingQuality.shadowRoot.textContent.includes('ancienne');maintenance.now=Date.now()/1000;
+    maintenance.diagnostic={...diagnostic,available:false};await maintenance.updateComplete;
+    valid&&=[...m.querySelectorAll('[data-field] dd')].every(dd=>dd.textContent==='Indisponible')
+      &&!m.querySelector('[data-transaction] time')&&!m.textContent.includes('future_hold');
+    maintenance.diagnostic={...diagnostic,lastUpdated:new Date(Date.now()-700000).toISOString(),live:{}};await maintenance.updateComplete;
+    const quality=m.querySelector('smartpi-publication-quality');await quality.updateComplete;
+    valid&&=field(m,'hold-source')==='Indisponible'&&m.textContent.includes('Aucun transfert daté publié')&&quality.shadowRoot.textContent.includes('ancienne');
+    maintenance.remove();learning.remove();
+    const integrated=[...p.shadowRoot.querySelectorAll('smartpi-explanations')];
+    return valid&&integrated.some(e=>e.mode==='maintenance')&&integrated.some(e=>e.mode==='learning')&&f.calls.length===0;
+  `);
+  assert.ok(checks.publishedExplanations,'Learning and maintenance explanations must preserve published reasons, zero, missing values, old transaction date and reliability');
+  checks.explanationsKeyboard={};
+  for(const mode of ['maintenance','learning']){
+    await journey(`const component=[...p.shadowRoot.querySelectorAll('smartpi-explanations')].find(e=>e.mode==='${mode}');
+      if('${mode}'==='learning')p.shadowRoot.querySelector('.learning-details').open=true;
+      component.shadowRoot.querySelector('details').open=false;component.shadowRoot.querySelector('summary').focus();`);
+    await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,text:'\r'});
+    await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
+    checks.explanationsKeyboard[mode]=await journey(`const component=[...p.shadowRoot.querySelectorAll('smartpi-explanations')].find(e=>e.mode==='${mode}');
+      const opened=component.shadowRoot.querySelector('details').open;component.shadowRoot.querySelector('details').open=false;
+      if('${mode}'==='learning')p.shadowRoot.querySelector('.learning-details').open=false;return opened;`);
+    assert.ok(checks.explanationsKeyboard[mode],'Explanation keyboard toggle '+mode);
+  }
   checks.learningCompact = await journey(`
     const learn=()=>p.shadowRoot.querySelector('.learn');
     const compact=learn().textContent.includes('Surveillance du modèle')&&!learn().querySelector('progress')

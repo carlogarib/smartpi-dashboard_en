@@ -36,13 +36,76 @@ class ObservatoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.observer.snapshot("sensor.demo")["available"])
 
     async def test_snapshot_records_only_published_context_flags_and_bound_target(self):
-        self.climate_attrs.update(window_manager={"window_state": "on"}, safety_manager={"is_safety_detected": True}, power_manager={"is_overpowering_detected": False})
+        self.climate_attrs.update(window_manager={"window_state": "on"}, safety_manager={"safety_state": "on"}, power_manager={"overpowering_state": "off"})
         self.hass.states.async_set("climate.demo", "heat", self.climate_attrs)
         self.assertFalse(self.observer.snapshot("sensor.demo")["bound"])
         self.hass.states.async_set("sensor.demo", "fresh", self.sensor_attrs)
         p = self.observer.snapshot("sensor.demo")
         self.assertTrue(p["bound"])
         self.assertEqual((p["window"], p["safety"], p["overpowering"]), ("on", True, False))
+
+    async def test_missing_suspension_states_are_not_invented_as_inactive(self):
+        p = self.observer.snapshot("sensor.demo")
+        self.assertEqual((p["window"], p["safety"], p["overpowering"]), (None, None, None))
+
+    async def test_window_auto_manual_bypass_and_unknown_context(self):
+        cases = [
+            ({"is_window_configured": True, "is_window_auto_configured": True, "window_manager": {"window_state": "unknown", "window_auto_state": "on", "is_window_bypass": False}}, "on"),
+            ({"is_window_configured": True, "is_window_auto_configured": True, "window_manager": {"window_state": "unknown", "window_auto_state": "off", "is_window_bypass": False}}, "off"),
+            ({"is_window_configured": True, "is_window_auto_configured": False, "window_manager": {"window_state": "off", "window_auto_state": "unknown", "is_window_bypass": False}}, "off"),
+            ({"is_window_configured": True, "is_window_auto_configured": True, "window_manager": {"window_state": "on", "window_auto_state": "on", "is_window_bypass": True}}, "off"),
+            ({"is_window_configured": False, "is_window_auto_configured": False}, "off"),
+            ({"is_window_configured": True, "is_window_auto_configured": True, "window_manager": {"window_state": "off", "window_auto_state": "unknown", "is_window_bypass": False}}, None),
+        ]
+        for context, expected in cases:
+            with self.subTest(context=context):
+                self.hass.states.async_set("climate.demo", "heat", {**self.climate_attrs, **context})
+                self.assertEqual(self.observer.snapshot("sensor.demo")["window"], expected)
+
+    async def test_explicitly_disabled_suspension_features_are_known_inactive(self):
+        self.hass.states.async_set("climate.demo", "heat", {**self.climate_attrs, "is_safety_configured": False, "is_power_configured": False})
+        p = self.observer.snapshot("sensor.demo")
+        self.assertEqual((p["safety"], p["overpowering"]), (False, False))
+
+    async def test_global_orphan_inventory_needs_no_diagnostic_and_cannot_mutate(self):
+        self.hass.states.async_remove("sensor.demo")
+        await self.hass.async_block_till_done()
+        result = await self.observer.request(None, "get", {})
+        self.assertEqual(result["orphans"][0]["entity_id"], "sensor.demo")
+        for action, payload in (("clear", {}), ("get", {"extra": True}), ("trial_start", {"label": "No source"})):
+            with self.assertRaises(ValueError):
+                await self.observer.request(None, action, payload)
+        self.assertEqual(list(self.observer.book.data["rooms"]), ["sensor.demo"])
+
+    async def test_removed_diagnostic_book_can_be_read_and_cleared_without_recreation(self):
+        await self.observer.request("sensor.demo", "bookmark_save", {"label": "À conserver"})
+        self.hass.states.async_remove("sensor.demo")
+        await self.hass.async_block_till_done()
+        result = await self.observer.request("sensor.demo", "get", {})
+        self.assertEqual(result["bookmarks"][0]["label"], "À conserver")
+        self.assertEqual(result["orphans"], [{"entity_id": "sensor.demo", "bookmarks": 1, "trials": 0, "forecasts": 0, "receipts": 0, "points": len(result["points"])}])
+        with self.assertRaises(ValueError):
+            await self.observer.request("sensor.demo", "trial_start", {"label": "Interdit"})
+        self.assertEqual(await self.observer.request("sensor.demo", "clear", {}), {"cleared": True})
+        self.assertNotIn("sensor.demo", self.observer.book.data["rooms"])
+        for action in ("get", "clear"):
+            with self.assertRaises(ValueError):
+                await self.observer.request("sensor.demo", action, {})
+        self.assertNotIn("sensor.demo", self.observer.book.data["rooms"])
+
+    async def test_full_book_exposes_orphans_and_clear_frees_a_place_for_current_diagnostic(self):
+        from custom_components.smartpi_dashboard.observations import ObservationBook
+        self.observer.book = ObservationBook()
+        for index in range(32):
+            self.observer.book.room(f"sensor.removed_{index}")
+        result = await self.observer.request("sensor.demo", "get", {})
+        self.assertEqual(len(result["orphans"]), 32)
+        self.assertEqual(result["bookmarks"], [])
+        self.assertNotIn("sensor.demo", self.observer.book.data["rooms"])
+        await self.observer.request("sensor.removed_0", "clear", {})
+        result = await self.observer.request("sensor.demo", "get", {})
+        self.assertEqual(len(result["orphans"]), 31)
+        self.assertIn("sensor.demo", self.observer.book.data["rooms"])
 
     async def test_bookmark_round_trip_via_native_store(self):
         from homeassistant.helpers.storage import Store
@@ -72,12 +135,15 @@ class ObservatoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.observer.book.export("sensor.demo")["forecasts"], [])
 
     async def test_removal_of_source_interrupts_the_trial_immediately(self):
+        self.hass.states.async_set("climate.demo", "heat", {**self.climate_attrs, "safety_manager": {"safety_state": "on"}})
+        await self.hass.async_block_till_done()
         await self.observer.request("sensor.demo", "trial_start", {"label": "Avant retrait"})
         self.hass.states.async_remove("sensor.demo")
         await self.hass.async_block_till_done()
         room = self.observer.book.export("sensor.demo")
         self.assertFalse(room["current"]["available"])
         self.assertEqual(room["trials"][0]["status"], "excluded")
+        self.assertIsNone(room["points"][-1]["safety"])
 
     async def test_ws_requires_admin_and_has_strict_action_schema(self):
         from homeassistant.exceptions import Unauthorized
@@ -89,6 +155,10 @@ class ObservatoryTests(unittest.IsolatedAsyncioTestCase):
         conn.send_result.assert_not_called()
         schema = handle_observatory._ws_schema
         self.assertEqual(schema(msg)["action"], "get")
+        global_msg = {key: value for key, value in msg.items() if key != "entity_id"}
+        self.assertNotIn("entity_id", schema(global_msg))
+        with self.assertRaises(Unauthorized):
+            handle_observatory(self.hass, SimpleNamespace(user=SimpleNamespace(is_admin=False)), global_msg)
         with self.assertRaises(Exception):
             schema({**msg, "action": "call_service"})
 

@@ -1,5 +1,5 @@
 import {num} from "../adapter";
-import {normalize, timestamp, valueAt, type Sample} from "./timeseries";
+import {normalize, sameSampleContext, timestamp, valueAt, type Sample} from "./timeseries";
 
 export class PublicationQuality {
   static describe(value: unknown, date: unknown, available = true, now = Date.now()/1000) {
@@ -12,6 +12,7 @@ export class PublicationQuality {
 }
 
 export interface ObservationPoint {
+  suspensions_observed_at?: number | null;
   time: number; temperature: number | null; target: number | null; outdoor: number | null;
   applied: number | null; mode?: string | null; unit?: string | null; climate_id?: string | null;
   preset?: string | null; bound?: boolean; window?: string | null; safety?: boolean | null; overpowering?: boolean | null;
@@ -67,7 +68,7 @@ export class ComparisonTrace {
     for(const s of normalize(samples).filter(s=>s.time>=start&&s.time<=end)){
       const error=valueAt(s,"error"),applied=valueAt(s,"power.applied_percent");
       const valid=!s.observedAt && s.unit===unit && !["unknown","unavailable"].includes(s.state) && error!==null && applied!==null && applied>=0 && applied<=100;
-      if(!valid || (previous && (s.time-previous.time>600 || s.context!==previous.context))){if(segment.length)this.segments.push(segment);segment=[];}
+      if(!valid || (previous && (s.time-previous.time>600 || !sameSampleContext(s,previous)))){if(segment.length)this.segments.push(segment);segment=[];}
       if(valid){segment.push({time:s.time,error:error!,applied:applied!});count++;}
       previous=s;
     }

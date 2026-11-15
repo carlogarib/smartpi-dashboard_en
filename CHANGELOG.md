@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.5.0 — 2026-11-15 — Fiabilité et explications SmartPI
+
+- Durcissement reproductible de la fusion d’options uPlot pour empêcher les
+  traversées de prototypes et traiter l’alerte CodeQL nº5.
+- Suspensions décodées depuis les états VTherm publiés : sécurité, délestage,
+  fenêtre manuelle/automatique et bypass ; anciennes données inconnues conservées.
+- Trois barres temporelles sous les températures : fenêtre, sécurité, délestage,
+  avec périodes inconnues hachurées, provenance carnet local et table accessible.
+- Navigation entre pièces sans fausse attente du Twin ; coupures des courbes et
+  phases thermiques sur lacunes longues, changement d’unité ou de contexte.
+- Unités archivées respectées dans journaux, projections, médianes et détails ;
+  agrégats incompatibles refusés. Kp, Ki et intégrale archivés restitués en relecture.
+- Inventaire administrateur des carnets sans diagnostic, consultation et
+  suppression explicite pour libérer le quota, y compris sans capteur actif.
+- Documentation française d’installation alignée sur la distribution par release.
+- Explications du maintien et du dernier transfert FF/intégrale sur motifs publiés,
+  gains et mémoire PI sur trois courbes facultatives, attentes d’apprentissage
+  rapprochées de leurs motifs. [Détail](docs/SMARTPI_EXPLANATIONS_PROPOSAL.md).
+- Reconnexion pendant un envoi : aperçu invalidé, résultat incertain explicite,
+  aucun renvoi implicite de commande.
+
 Historique de développement de SmartPI Dashboard depuis le 6 novembre 2026.
 Les dates correspondent au développement, pas à des dates de releases GitHub.
 Les étapes 0.1.0 à 0.2.7 étaient déjà présentes dans l’historique publié.

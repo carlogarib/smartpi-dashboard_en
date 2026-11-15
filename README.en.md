@@ -46,7 +46,7 @@ Add `gael1980/smartpi-dashboard` as a custom **Integration** repository under
 Open the sidebar panel as an administrator. Updates to a loaded custom integration
 require a Home Assistant restart.
 
-Version 0.4.0 is distributed as a [GitHub release](https://github.com/gael1980/smartpi-dashboard/releases).
+Version 0.5.0 is distributed as a [GitHub release](https://github.com/gael1980/smartpi-dashboard/releases).
 Marketplace can discover published updates for users who have installed this custom
 repository. Discovery is periodic, not immediate. The repository is not included
 in the default catalog. Home Assistant 2026.11.0 or newer is required.

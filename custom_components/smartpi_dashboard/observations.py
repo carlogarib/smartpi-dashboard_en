@@ -18,14 +18,14 @@ class ObservationBook:
     GAP_S = 600
 
     @classmethod
-    def validate_request(cls, entity_id, action, payload):
+    def validate_request(cls, entity_id, action, payload, *, inventory=False):
         """Validate the entire metadata request before touching a room."""
         fields = {"get": (), "clear": (), "bookmark_save": ("label",),
                   "trial_start": ("label",), "trial_stop": ("id",),
                   "trial_feedback": ("id", "feedback"), "receipt_begin": ("choice",),
                   "receipt_finish": ("id", "success", "not_sent"),
                   **{f"{kind}_delete": ("id",) for kind in ("bookmark", "trial", "receipt", "forecast")}}
-        if not isinstance(entity_id, str) or not re.fullmatch(r"sensor\.[a-z0-9_]{1,248}", entity_id):
+        if not (inventory and entity_id is None and action == "get") and (not isinstance(entity_id, str) or not re.fullmatch(r"sensor\.[a-z0-9_]{1,248}", entity_id)):
             raise ValueError("Identifiant de diagnostic invalide.")
         if not isinstance(action, str) or action not in fields or not isinstance(payload, dict) or payload.keys() - set(fields[action]):
             raise ValueError("Requête de métadonnées invalide.")
@@ -94,6 +94,7 @@ class ObservationBook:
                     require(isinstance(item, dict))
                     if group == "points":
                         require(timestamp(item.get("time")))
+                        require("suspensions_observed_at" not in item or timestamp(item["suspensions_observed_at"]))
                         require(all(nullable(item.get(k)) for k in ("temperature", "target", "outdoor", "applied")))
                         require(all(item.get(k) is None or type(item[k]) is bool for k in ("bound", "safety", "overpowering")))
                         require(item.get("window") in (None, "on", "off"))
@@ -177,9 +178,11 @@ class ObservationBook:
         context = [point.get(k) for k in ("climate_id", "mode", "target", "unit")]
         if previous and context != [previous.get(k) for k in ("climate_id", "mode", "target", "unit")]:
             room["forecast_context"] = None
-        if previous and (context != [previous.get(k) for k in ("climate_id", "mode", "target", "unit")] or not point["available"]):
+        suspension_changed = not published and previous and any(previous.get(k) != point.get(k) for k in ("window", "safety", "overpowering"))
+        if previous and (context != [previous.get(k) for k in ("climate_id", "mode", "target", "unit")] or not point["available"] or suspension_changed):
             # A discontinuity is an observed boundary, never a fabricated temperature.
-            room["points"].append({"time": point["observed_at"], "temperature": None, "target": None, "outdoor": None, "applied": None, "bound": False})
+            room["points"].append({"time": point["observed_at"], "suspensions_observed_at": point["observed_at"], "temperature": None, "target": None, "outdoor": None, "applied": None, "bound": False,
+                                   **{k: point.get(k) for k in ("climate_id", "mode", "unit", "window", "safety", "overpowering")}})
             room["points"] = room["points"][-self.MAX_POINTS:]
         for group in ("trials", "forecasts"):
             for item in room[group]:
@@ -214,7 +217,7 @@ class ObservationBook:
         if point["observed_at"] - point["time"] > self.GAP_S or point["time"] > point["observed_at"] + 60:
             return
         # A publication older than an episode start is never retrospective evidence.
-        room["points"].append({k: point.get(k) for k in ("time", "temperature", "target", "outdoor", "applied", "mode", "unit", "climate_id", "preset", "bound", "window", "safety", "overpowering")})
+        room["points"].append({"suspensions_observed_at": point["observed_at"], **{k: point.get(k) for k in ("time", "temperature", "target", "outdoor", "applied", "mode", "unit", "climate_id", "preset", "bound", "window", "safety", "overpowering")}})
         room["points"] = room["points"][-self.MAX_POINTS:]
         for receipt in room["receipts"]:
             if receipt["status"] != "pending" or receipt.get("confirmed_at") is None or point["time"] < receipt["confirmed_at"]:
@@ -336,7 +339,7 @@ class ObservationBook:
         room = deepcopy(self.room(entity_id))
         # Admin-only bounded projection; never return arbitrary stored attributes.
         fields = ("time", "temperature", "target", "outdoor", "applied", "mode", "unit", "climate_id", "preset", "bound", "window", "safety", "overpowering")
-        room["points"] = [{key: point.get(key) for key in fields} for point in room["points"][-self.MAX_POINTS:]]
+        room["points"] = [{**{key: point.get(key) for key in fields}, **({"suspensions_observed_at": point["suspensions_observed_at"]} if "suspensions_observed_at" in point else {})} for point in room["points"][-self.MAX_POINTS:]]
         room.pop("revision", None)
         room.pop("forecast_context", None)
         for trial in room["trials"]:

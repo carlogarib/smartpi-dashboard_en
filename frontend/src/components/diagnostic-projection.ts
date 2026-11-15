@@ -77,7 +77,7 @@ export class DiagnosticProjectionElement extends LitElement {
   protected render() {
     const model = this.kind === "model", data = this.projection, points = data.points;
     const title = model ? "Parcours des coefficients A/B" : "Écart filtré et commande appliquée";
-    const xlabel = model ? "A publié (°C/min/u)" : "Consigne filtrée − mesure (°C)";
+    const xlabel = model ? `A publié (${data.unit}/min/u)` : `Consigne filtrée − mesure (${data.unit})`;
     const ylabel = model ? "B publié (min⁻¹)" : "Commande appliquée (%)";
     const index = this.selected < 0 ? points.length - 1 : Math.min(this.selected, points.length - 1), point = points[index];
     const {x, y, xr, yr} = points.length ? this.coordinates() : {x: (_: number) => 0, y: (_: number) => 0, xr: [0, 1], yr: [0, 1]};
@@ -116,6 +116,7 @@ export class DiagnosticProjectionElement extends LitElement {
           </tbody></table></div>
           <div class="pages"><button type="button" ?disabled=${this.page === 0} @click=${() => --this.page}>Page précédente</button><span>${this.page + 1} / ${Math.ceil(points.length / 25)}</span><button type="button" ?disabled=${(this.page + 1) * 25 >= points.length} @click=${() => ++this.page}>Page suivante</button></div>
         </details>` : html`<p class="empty">Aucun couple ${model ? "A/B" : "écart / commande"} exploitable dans cette source et cette fenêtre.</p>`}
+      ${!data.compatibleUnits ? html`<p class="notice">Unités archivées différentes : aucun axe commun. Réduisez la période.</p>` : nothing}
       ${data.reduced ? html`<p class="notice">${model ? "600 derniers couples distincts affichés" : "600 publications réparties dans la fenêtre pour le dessin"} sur ${data.distinct}. Zoomez pour examiner une période plus courte. La sélection et la table portent sur ces points affichés.</p>` : nothing}
       <p class="foot">${model ? "Les couples identiques successifs sont regroupés. Les traits suivent les publications, coupés aux données manquantes et interruptions supérieures à 10 min. Une variation ne prouve pas un apprentissage accepté ; la confiance actuelle ne valide pas le passé." : "Chaque point associe deux valeurs de la même publication. Le nombre de points ne représente pas une durée ; cet écart filtré n’est ni l’erreur de l’intégrateur ni une mesure de confort. Aucun ajustement de courbe n’est calculé."}</p>
     </section>`;

@@ -31,6 +31,21 @@ session conserve dorénavant l’unité observée et le contexte de liaison/mode
 unité enregistrée, les valeurs sont libellées « unité source » ; l’unité actuelle
 n’est pas appliquée rétrospectivement. Aucune conversion historique n’est devinée.
 
+## Suspensions sous les températures
+
+Trois pistes décrivent les suspensions observées : fenêtre, sécurité, délestage.
+Elles proviennent du carnet local, pas du Recorder des diagnostics. Le même axe
+de temps permet de les rapprocher visuellement sans fusionner les sources.
+Les états `safety_state` et `overpowering_state` publiés par VTherm sont décodés ;
+la fenêtre tient compte de la détection automatique et du bypass publié.
+
+Le champ `suspensions_observed_at` date l’observation de ces états. Les anciens
+points dépourvus de ce champ restent inconnus. Une couleur pleine indique actif,
+un fond neutre inactif, des hachures inconnu/non archivé. Aucun segment n’est
+prolongé après la dernière observation ni entre deux observations séparées de
+plus de 10 minutes ou de liaisons différentes. La table énumère les plages actives.
+Cette proximité graphique ne démontre pas la cause d’une baisse de température.
+
 ## Comparaison des pièces
 
 Fenêtre commune : dernière heure de **session**. Pour chaque groupe d’unité

@@ -17,6 +17,7 @@ export class ThermalJourneyElement extends LitElement {
   @state() private failed = false;
   @state() private awaitingPublication?: string | null;
   private context = "";
+  private diagnosticId = "";
   private generation = 0;
   private activeRequest?: symbol;
   private etaTimer?: ReturnType<typeof setTimeout>;
@@ -25,7 +26,8 @@ export class ThermalJourneyElement extends LitElement {
     if (!this.diagnostic) return;
     const next = new ThermalJourney(this.hass, this.diagnostic).context;
     if (next !== this.context) {
-      const initial = !this.context;
+      const initial = !this.context || this.diagnosticId !== this.diagnostic.entityId;
+      this.diagnosticId = this.diagnostic.entityId;
       this.context = next;
       this.choice = undefined;
       this.message = initial ? "" : this.sending ? "Le thermostat a changé. Vérifiez les valeurs reçues." : "";
@@ -39,7 +41,19 @@ export class ThermalJourneyElement extends LitElement {
     const expires = Date.parse(this.diagnostic?.lastUpdated ?? "") + 600_001 - Date.now();
     if (Number.isFinite(expires) && expires > 0) this.etaTimer = setTimeout(() => this.requestUpdate(), expires);
   }
-  disconnectedCallback() { ++this.generation; clearTimeout(this.etaTimer); super.disconnectedCallback(); }
+  disconnectedCallback() {
+    ++this.generation;
+    clearTimeout(this.etaTimer);
+    this.choice = undefined;
+    if (this.sending) {
+      this.sending = false;
+      this.activeRequest = undefined;
+      this.failed = true;
+      this.message = "Résultat non confirmé après la fermeture du panneau. Vérifiez les valeurs reçues avant un nouveau choix.";
+      this.awaitingPublication = this.diagnostic?.lastUpdated;
+    }
+    super.disconnectedCallback();
+  }
   private choose(choice: Choice) { if (!this.sending) { this.choice = choice; this.message = ""; this.failed = false; } }
   private cancel() { this.choice = undefined; this.message = ""; }
   async previewTemperature(value: number) {

@@ -9,6 +9,9 @@ import {
   SessionHistory,
   normalize,
   usable,
+  archivedUnit,
+  sameSampleContext,
+  compatibleSampleUnits,
 } from "../.build-tests/utils/timeseries.mjs";
 import { readHistory } from "../.build-tests/services/history.mjs";
 import { ControlPresentation } from "../.build-tests/utils/control.mjs";
@@ -106,7 +109,7 @@ test("events distinguish filtered setpoint variations and phase changes; no brid
   ]);
   assert.equal(
     observedEvents([a, b])[0].label,
-    "Consigne filtrée 19 → 19.1 °C",
+    "Consigne filtrée 19 → 19.1 unité source",
   );
 });
 test("Twin historical values require recorded live and reliability; history standard gives no Twin", () => {
@@ -351,4 +354,50 @@ test("bootstrap sample collection has its own label without inventing an accepte
   assert.equal(marks.length, 1);
   assert.match(marks[0].label, /mesure\(s\) collectée/);
   assert.doesNotMatch(marks[0].label, /accepté/);
+});
+
+test("archive units label events and learning without borrowing current climate metadata", () => {
+  const s=(time,target,count,unit)=>({time,state:'stable',unit,context:'room/heat',history:{setpoint:{filtered_setpoint:target},model:{a:.1}},live:{learning:{accepted_updates_a:count}}});
+  const pair=[s(1,68,1,'°F'),s(2,69,2,'°F')];
+  assert.equal(archivedUnit(pair),'°F');
+  assert.equal(observedEvents(pair)[0].label,'Consigne filtrée 68 → 69 °F');
+  assert.match(learningMarks(pair)[0].label,/0.1 °F\/min\/u/);
+  const unknown=pair.map(s=>({...s,unit:undefined}));
+  assert.equal(archivedUnit(unknown),'unité source');
+  assert.match(learningMarks(unknown)[0].label,/unité source\/min\/u/);
+  assert.equal(compatibleSampleUnits(unknown),true);
+  const mixed=[pair[0],{...pair[1],unit:'°C'}];
+  assert.equal(compatibleSampleUnits(mixed),false);
+  assert.equal(sameSampleContext(...mixed),false);
+  assert.equal(observedEvents(mixed).filter(e=>e.label.startsWith('Consigne')).length,0);
+  assert.equal(learningMarks(mixed).length,0);
+  assert.equal(learningMarks([pair[0],{...pair[1],context:'room/cool'}]).length,0);
+});
+
+test("tracking refuses medians across recorded units or mode/binding contexts", () => {
+  const [a,b]=decodeRows([row(1),row(2)]);
+  for(const pair of [[{...a,unit:'°C'},{...b,unit:'°F'}],[{...a,context:'heat'},{...b,context:'cool'}],[a,{...b,unit:'°C'}]]){
+    const result=observedTracking(pair);
+    assert.equal(result.pairs,2);
+    assert.equal(result.signedMedian,null);
+    assert.equal(result.absoluteMedian,null);
+    assert.equal(result.largestInterval,null);
+  }
+});
+
+test("Recorder PI-only publications remain usable with zero gains and integral, missing fields remain holes", () => {
+  const paths=['control.kp','control.ki','temperature.integral_error'];
+  const samples=decodeRows([
+    row(1,'stable',{control:{kp:0,ki:0},temperature:{integral_error:0}}),
+    row(2,'stable',{control:{kp:null,ki:.02},temperature:{integral_error:null}}),
+    row(3,'stable',{}),
+    row(4,'unavailable',{control:{kp:99,ki:99},temperature:{integral_error:99}}),
+  ]);
+  assert.equal(usable(samples),true);
+  for(const path of paths)assert.equal(usable([{...samples[0],history:path==='temperature.integral_error'?{temperature:{integral_error:0}}:{control:{[path.split('.')[1]]:0}}}]),true);
+  assert.deepEqual(samples.map(s=>paths.map(path=>valueAt(s,path))),[[0,0,0],[null,.02,null],[null,null,null],[null,null,null]]);
+  assert.equal(usable(samples.slice(2)),false);
+  const liveOnly={...samples[2],live:{control:{kp:42,ki:42},temperature:{integral_error:42}}};
+  assert.deepEqual(paths.map(path=>valueAt(liveOnly,path)),[null,null,null]);
+  assert.equal(usable([liveOnly]),false);
 });

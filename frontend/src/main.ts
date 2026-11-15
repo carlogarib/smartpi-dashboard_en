@@ -7,7 +7,10 @@ import "./components/thermal-journey";
 import type {ClimateConnection} from "./services/climate";
 import type {ObservatoryConnection} from "./services/observatory";
 import "./components/observatory";
+import "./components/orphan-notebooks";
+import type {ObservationPoint} from "./utils/evidence";
 import "./components/publication-quality";
+import "./components/smartpi-explanations";
 import "./components/room-comparison";
 import type {ObservatoryElement} from "./components/observatory";
 import type {ThermalJourneyElement} from "./components/thermal-journey";
@@ -126,6 +129,7 @@ export class SmartPIDashboardPanel extends LitElement {
   @property({attribute:false}) panel?: unknown;
   @property({type:Boolean}) narrow = false;
   @state() private selectedId = "";
+  @state() private observationData?: {entityId:string;points:ObservationPoint[];error:string};
 
   private sessionHistory = new SessionHistory();
   private freshnessTimer?: ReturnType<typeof setInterval>;
@@ -149,8 +153,8 @@ export class SmartPIDashboardPanel extends LitElement {
       </div></div>`;
   }
 
-  private field(f: Field, live: Record<string, unknown>) {
-    const value = display(reliableValue(live, f.path, f.reliable), f.unit ?? "", f.digits ?? 2);
+  private field(f: Field, live: Record<string, unknown>, unit: string) {
+    const value = display(reliableValue(live, f.path, f.reliable), (f.unit ?? "").replace("°C",unit), f.digits ?? 2);
     return html`<div class="detail" title=${f.path}><span>${f.label}</span><strong>${value}</strong></div>`;
   }
 
@@ -161,6 +165,7 @@ export class SmartPIDashboardPanel extends LitElement {
 
     const monitoring = !bootstrap && at(v, "learning.stage") === "monitoring";
     const learningDetails = html`
+          <smartpi-explanations mode="learning" .diagnostic=${d} .now=${Date.now()/1000}></smartpi-explanations>
           <div class="columns">
             ${(["a", "b"] as const).map((key) => {
               const count = num(at(v, `learning.emea_samples_${key}`));
@@ -222,6 +227,7 @@ export class SmartPIDashboardPanel extends LitElement {
         <p class="muted small">Dernière publication ${publication === null ? "indisponible" : html`<time datetime=${d.lastUpdated ?? ""}>${publicationFormat.format(publication * 1000)}</time>`}</p>
         <smartpi-thermal-journey .hass=${this.hass} .diagnostic=${d}
           @observatory-refresh=${(event: CustomEvent<{entityId: string}>) => {if (event.detail.entityId === d.entityId) void this.renderRoot.querySelector<ObservatoryElement>("smartpi-observatory")?.refresh();}}></smartpi-thermal-journey>
+        <smartpi-explanations mode="maintenance" .diagnostic=${d} .now=${Date.now()/1000}></smartpi-explanations>
         <div class="metrics">
           ${this.metric("Commande appliquée",at(v,"power.applied_percent")," %",1,d.lastUpdated ?? "")}
           ${this.metric("Température extérieure",at(v,"temperature.outdoor"),new ThermalJourney(this.hass,d).unit ?? "",2,d.lastUpdated ?? "")}
@@ -234,12 +240,13 @@ export class SmartPIDashboardPanel extends LitElement {
         </section>
       </section>
       <smartpi-observatory .hass=${this.hass} .diagnostic=${d}
+        @observatory-points=${(event: CustomEvent<{entityId:string;points:ObservationPoint[];error:string}>) => {if(event.detail.entityId===d.entityId)this.observationData=event.detail;}}
         @prepare-temperature=${(event: CustomEvent<{entityId: string; value: number}>) => {
           if (event.detail.entityId !== d.entityId) return;
           const journey = this.renderRoot.querySelector<ThermalJourneyElement>("smartpi-thermal-journey");
           if (journey) void journey.previewTemperature(event.detail.value).then(prepared => {if (prepared) journey.scrollIntoView({block: "center"});});
         }}></smartpi-observatory>
-      <smartpi-visual-diagnostics .hass=${this.hass} .diagnostic=${d} .session=${this.sessionHistory.get(d.entityId)}></smartpi-visual-diagnostics>
+      <smartpi-visual-diagnostics .hass=${this.hass} .diagnostic=${d} .session=${this.sessionHistory.get(d.entityId)} .observations=${this.observationData?.entityId===d.entityId ? this.observationData.points : []} .observationError=${this.observationData?.entityId===d.entityId ? this.observationData.error : ""}></smartpi-visual-diagnostics>
       <details class="surface technical"><summary>Diagnostics techniques complets</summary>
       <section><h3>Comprendre la situation</h3><ul>${notes.map(s=>html`<li>${s}</li>`)}</ul></section>
       <div class="subhead"><h2>Diagnostics techniques</h2><span class="muted small">Déplier pour comprendre les détails</span></div>
@@ -247,7 +254,7 @@ export class SmartPIDashboardPanel extends LitElement {
         ${sections.map(s=>html`<details class="surface">
           <summary>${s.title}<span class="chevron">⌄</span></summary>
           <p class="muted small">${s.note}</p>
-          <div class="detail-grid">${s.fields.map(f=>this.field(f,v))}</div>
+          <div class="detail-grid">${s.fields.map(f=>this.field(f,v,d.temperatureUnit ?? "unité source"))}</div>
         </details>`)}
       </div>
       <details class="surface raw"><summary>Diagnostic brut JSON <span class="chevron">⌄</span></summary>
@@ -295,6 +302,7 @@ export class SmartPIDashboardPanel extends LitElement {
           html`<div class="tiles">${list.map(d => this.thermostatTile(d, selected?.entityId === d.entityId))}</div>
           <smartpi-room-comparison .rooms=${list.map(d=>({id:d.entityId,name:d.name,unit:new ThermalJourney(this.hass,d).unit,samples:this.sessionHistory.get(d.entityId)}))} .end=${Date.now()/1000}></smartpi-room-comparison>
           ${selected?this.showDiagnostic(selected):nothing}`}
+        <smartpi-orphan-notebooks .hass=${this.hass} @observatory-recovery=${() => void this.renderRoot.querySelector<ObservatoryElement>("smartpi-observatory")?.refresh()}></smartpi-orphan-notebooks>
         <footer>Source : capteurs SmartPI Diagnostics v2 · Réglage de température et de preset sur sélection explicite</footer>
       </main>`;
   }
